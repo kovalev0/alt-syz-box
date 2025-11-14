@@ -1,0 +1,155 @@
+From 483b2554c23e288f2fd513afc8f5be8c3de751c5 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Tue, 18 Nov 2025 14:01:57 +0000
+Subject: [PATCH] sys/linux: add dev/watchdog* descriptions
+
+---
+ sys/linux/dev_watchdog.txt       | 93 ++++++++++++++++++++++++++++++++
+ sys/linux/dev_watchdog.txt.const | 35 ++++++++++++
+ 2 files changed, 128 insertions(+)
+ create mode 100644 sys/linux/dev_watchdog.txt
+ create mode 100644 sys/linux/dev_watchdog.txt.const
+
+diff --git a/sys/linux/dev_watchdog.txt b/sys/linux/dev_watchdog.txt
+new file mode 100644
+index 0000000..a589613
+--- /dev/null
++++ b/sys/linux/dev_watchdog.txt
+@@ -0,0 +1,93 @@
++include <uapi/linux/watchdog.h>
++include <uapi/linux/fcntl.h>
++
++resource fd_watchdog[fd]
++resource fd_watchdog_sysfs[fd]
++
++# ==================== DEVICE FILES ====================
++
++watchdog_devices = "/dev/watchdog", "/dev/watchdog0", "/dev/watchdog1"
++
++openat$watchdog(fd const[AT_FDCWD], file ptr[in, string[watchdog_devices]], flags flags[open_flags], mode const[0]) fd_watchdog
++
++# ==================== WATCHDOG IOCTL ====================
++
++ioctl$WDIOC_GETSUPPORT(fd fd_watchdog, cmd const[WDIOC_GETSUPPORT], arg ptr[out, watchdog_info])
++ioctl$WDIOC_GETSTATUS(fd fd_watchdog, cmd const[WDIOC_GETSTATUS], arg ptr[out, int32])
++ioctl$WDIOC_GETBOOTSTATUS(fd fd_watchdog, cmd const[WDIOC_GETBOOTSTATUS], arg ptr[out, int32])
++ioctl$WDIOC_GETTEMP(fd fd_watchdog, cmd const[WDIOC_GETTEMP], arg ptr[out, int32])
++ioctl$WDIOC_SETOPTIONS(fd fd_watchdog, cmd const[WDIOC_SETOPTIONS], arg ptr[in, flags[watchdog_options, int32]])
++ioctl$WDIOC_KEEPALIVE(fd fd_watchdog, cmd const[WDIOC_KEEPALIVE])
++ioctl$WDIOC_SETTIMEOUT(fd fd_watchdog, cmd const[WDIOC_SETTIMEOUT], arg ptr[inout, int32[1:300]])
++ioctl$WDIOC_GETTIMEOUT(fd fd_watchdog, cmd const[WDIOC_GETTIMEOUT], arg ptr[out, int32])
++ioctl$WDIOC_GETTIMELEFT(fd fd_watchdog, cmd const[WDIOC_GETTIMELEFT], arg ptr[out, int32])
++ioctl$WDIOC_SETPRETIMEOUT(fd fd_watchdog, cmd const[WDIOC_SETPRETIMEOUT], arg ptr[in, int32[0:300]])
++ioctl$WDIOC_GETPRETIMEOUT(fd fd_watchdog, cmd const[WDIOC_GETPRETIMEOUT], arg ptr[out, int32])
++
++# ==================== SYSFS INTERFACE ====================
++
++# Read-only sysfs files
++sysfs_watchdog_paths_ro = "/sys/class/watchdog/watchdog0/bootstatus", "/sys/class/watchdog/watchdog0/identity", "/sys/class/watchdog/watchdog0/state", "/sys/class/watchdog/watchdog0/status", "/sys/class/watchdog/watchdog0/fw_version", "/sys/class/watchdog/watchdog0/options", "/sys/class/watchdog/watchdog0/max_timeout", "/sys/class/watchdog/watchdog0/min_timeout", "/sys/class/watchdog/watchdog0/nowayout", "/sys/class/watchdog/watchdog1/bootstatus", "/sys/class/watchdog/watchdog1/identity", "/sys/class/watchdog/watchdog1/state", "/sys/class/watchdog/watchdog1/status", "/sys/class/watchdog/watchdog1/fw_version", "/sys/class/watchdog/watchdog1/options", "/sys/class/watchdog/watchdog1/max_timeout", "/sys/class/watchdog/watchdog1/min_timeout", "/sys/class/watchdog/watchdog1/nowayout"
++
++openat$watchdog_sysfs_ro(fd const[AT_FDCWD], file ptr[in, string[sysfs_watchdog_paths_ro]], flags const[O_RDONLY], mode const[0]) fd_watchdog_sysfs
++
++read$watchdog_sysfs(fd fd_watchdog_sysfs, buf ptr[out, array[int8]], len bytesize[buf])
++
++# Read-write sysfs files
++sysfs_watchdog_timeout_paths = "/sys/class/watchdog/watchdog0/timeout", "/sys/class/watchdog/watchdog1/timeout"
++sysfs_watchdog_pretimeout_paths = "/sys/class/watchdog/watchdog0/pretimeout", "/sys/class/watchdog/watchdog1/pretimeout"
++sysfs_watchdog_pretimeout_governor_paths = "/sys/class/watchdog/watchdog0/pretimeout_governor", "/sys/class/watchdog/watchdog1/pretimeout_governor"
++
++openat$watchdog_timeout(fd const[AT_FDCWD], file ptr[in, string[sysfs_watchdog_timeout_paths]], flags flags[open_flags], mode const[0]) fd_watchdog_sysfs
++openat$watchdog_pretimeout(fd const[AT_FDCWD], file ptr[in, string[sysfs_watchdog_pretimeout_paths]], flags flags[open_flags], mode const[0]) fd_watchdog_sysfs
++openat$watchdog_pretimeout_governor(fd const[AT_FDCWD], file ptr[in, string[sysfs_watchdog_pretimeout_governor_paths]], flags flags[open_flags], mode const[0]) fd_watchdog_sysfs
++
++write$watchdog_timeout(fd fd_watchdog_sysfs, data ptr[in, stringnoz[watchdog_timeout_values]], len bytesize[data])
++write$watchdog_pretimeout(fd fd_watchdog_sysfs, data ptr[in, stringnoz[watchdog_pretimeout_values]], len bytesize[data])
++write$watchdog_pretimeout_governor(fd fd_watchdog_sysfs, data ptr[in, stringnoz[watchdog_governor_values]], len bytesize[data])
++
++watchdog_timeout_values = "1", "5", "10", "30", "60", "120", "300", "999", "2046"
++watchdog_pretimeout_values = "0", "1", "5", "10", "30", "60"
++watchdog_governor_values = "noop", "panic"
++
++# ==================== MODULE PARAMETERS ====================
++
++sysfs_watchdog_module_params = "/sys/module/watchdog/parameters/handle_boot_enabled", "/sys/module/watchdog/parameters/open_timeout", "/sys/module/watchdog/parameters/stop_on_reboot"
++
++openat$watchdog_module_param(fd const[AT_FDCWD], file ptr[in, string[sysfs_watchdog_module_params]], flags flags[open_flags], mode const[0]) fd_watchdog_sysfs
++
++write$watchdog_module_param(fd fd_watchdog_sysfs, data ptr[in, stringnoz[watchdog_module_param_values]], len bytesize[data])
++
++watchdog_module_param_values = "0", "1", "Y", "N"
++
++# ==================== STRUCTURES ====================
++
++watchdog_info {
++	options			flags[watchdog_caps, int32]
++	firmware_version	int32
++	identity		array[int8, 32]
++}
++
++# ==================== FLAGS ====================
++
++watchdog_options = WDIOS_DISABLECARD, WDIOS_ENABLECARD, WDIOS_TEMPPANIC
++
++watchdog_caps = WDIOF_OVERHEAT, WDIOF_FANFAULT, WDIOF_EXTERN1, WDIOF_EXTERN2, WDIOF_POWERUNDER, WDIOF_CARDRESET, WDIOF_POWEROVER, WDIOF_SETTIMEOUT, WDIOF_MAGICCLOSE, WDIOF_PRETIMEOUT, WDIOF_ALARMONLY, WDIOF_KEEPALIVEPING
++
++# ==================== WRITE (magic close & keepalive) ====================
++
++write$watchdog_magic(fd fd_watchdog, data ptr[in, string["V"]], len const[1])
++write$watchdog_keepalive(fd fd_watchdog, data ptr[in, array[int8]], len bytesize[data])
++
++# ==================== PCI BIND/UNBIND ====================
++
++resource fd_pci_i6300esb_bind[fd]
++
++sysfs_i6300esb_unbind = "/sys/bus/pci/drivers/i6300ESB timer/unbind"
++sysfs_i6300esb_bind = "/sys/bus/pci/drivers/i6300ESB timer/bind"
++
++openat$i6300esb_unbind(fd const[AT_FDCWD], file ptr[in, string[sysfs_i6300esb_unbind]], flags const[O_WRONLY], mode const[0]) fd_pci_i6300esb_bind
++openat$i6300esb_bind(fd const[AT_FDCWD], file ptr[in, string[sysfs_i6300esb_bind]], flags const[O_WRONLY], mode const[0]) fd_pci_i6300esb_bind
++
++write$i6300esb_unbind(fd fd_pci_i6300esb_bind, data ptr[in, string["0000:00:04.0"]], len const[12])
++write$i6300esb_bind(fd fd_pci_i6300esb_bind, data ptr[in, string["0000:00:04.0"]], len const[12])
+diff --git a/sys/linux/dev_watchdog.txt.const b/sys/linux/dev_watchdog.txt.const
+new file mode 100644
+index 0000000..61e28f1
+--- /dev/null
++++ b/sys/linux/dev_watchdog.txt.const
+@@ -0,0 +1,35 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AT_FDCWD = amd64:18446744073709551516
++O_RDONLY = amd64:0
++O_WRONLY = amd64:1
++WDIOC_GETBOOTSTATUS = amd64:2147768066
++WDIOC_GETPRETIMEOUT = amd64:2147768073
++WDIOC_GETSTATUS = amd64:2147768065
++WDIOC_GETSUPPORT = amd64:2150127360
++WDIOC_GETTEMP = amd64:2147768067
++WDIOC_GETTIMELEFT = amd64:2147768074
++WDIOC_GETTIMEOUT = amd64:2147768071
++WDIOC_KEEPALIVE = amd64:2147768069
++WDIOC_SETOPTIONS = amd64:2147768068
++WDIOC_SETPRETIMEOUT = amd64:3221509896
++WDIOC_SETTIMEOUT = amd64:3221509894
++WDIOF_ALARMONLY = amd64:1024
++WDIOF_CARDRESET = amd64:32
++WDIOF_EXTERN1 = amd64:4
++WDIOF_EXTERN2 = amd64:8
++WDIOF_FANFAULT = amd64:2
++WDIOF_KEEPALIVEPING = amd64:32768
++WDIOF_MAGICCLOSE = amd64:256
++WDIOF_OVERHEAT = amd64:1
++WDIOF_POWEROVER = amd64:64
++WDIOF_POWERUNDER = amd64:16
++WDIOF_PRETIMEOUT = amd64:512
++WDIOF_SETTIMEOUT = amd64:128
++WDIOS_DISABLECARD = amd64:1
++WDIOS_ENABLECARD = amd64:2
++WDIOS_TEMPPANIC = amd64:4
++__NR_ioctl = amd64:16
++__NR_openat = amd64:257
++__NR_read = amd64:0
++__NR_write = amd64:1
+-- 
+2.50.1
+

@@ -149,6 +149,32 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e 9P_FS -e 9P_FS_POSIX_ACL \
     -e NET_9P -e NET_9P_VIRTIO
 
+# ---------------------------------------------------
+# drivers_watchdog
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e WATCHDOG_CORE \
+    -e WATCHDOG_PRETIMEOUT_GOV \
+    -e WATCHDOG_HRTIMER_PRETIMEOUT \
+    -e WATCHDOG_PRETIMEOUT_GOV_NOOP \
+    -e WATCHDOG_PRETIMEOUT_GOV_PANIC
+
+# Disable found false crash: kernel panic: watchdog pretimeout event
+#./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+#    --set-val WATCHDOG_PRETIMEOUT_DEFAULT_GOV_NOOP  y \
+#    --set-val WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC n \
+#    -d WATCHDOG_PRETIMEOUT_GOV_PANIC
+
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e I6300ESB_WDT
+
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e SOFT_WATCHDOG
+
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e WATCHDOG_SYSFS
+
+# ---------------------------------------------------
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
