@@ -148,6 +148,15 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e 9P_FS -e 9P_FS_POSIX_ACL \
     -e NET_9P -e NET_9P_VIRTIO
 
+# ---------------------------------------------------
+# kvm
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e VIRTUALIZATION \
+    -e KVM -e KVM_INTEL -e KVM_AMD \
+    -e KVM_GUEST -e KVM_MMIO
+
+# ---------------------------------------------------
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
