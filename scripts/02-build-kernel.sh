@@ -149,6 +149,16 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e 9P_FS -e 9P_FS_POSIX_ACL \
     -e NET_9P -e NET_9P_VIRTIO
 
+# ---------------------------------------------------
+# drivers_hwmon_jc42
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e I2C -e I2C_CHARDEV -e I2C_STUB -e REGMAP_I2C
+
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e HWMON -e HWMON_DEBUG_CHIP -e SENSORS_JC42
+
+# ---------------------------------------------------
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \

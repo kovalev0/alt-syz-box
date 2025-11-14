@@ -1,0 +1,147 @@
+From 01a55397856b9a5609a39392c1253f1ad02650a1 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Mon, 17 Nov 2025 21:46:13 +0000
+Subject: [PATCH] sys/linux: add sys/class/hwmon/hwmon* jc42 devices
+ descriptions
+
+---
+ sys/linux/dev_hwmon_jc42.txt       | 104 +++++++++++++++++++++++++++++
+ sys/linux/dev_hwmon_jc42.txt.const |  15 +++++
+ 2 files changed, 119 insertions(+)
+ create mode 100644 sys/linux/dev_hwmon_jc42.txt
+ create mode 100644 sys/linux/dev_hwmon_jc42.txt.const
+
+diff --git a/sys/linux/dev_hwmon_jc42.txt b/sys/linux/dev_hwmon_jc42.txt
+new file mode 100644
+index 0000000..025f4b6
+--- /dev/null
++++ b/sys/linux/dev_hwmon_jc42.txt
+@@ -0,0 +1,104 @@
++# JEDEC JC42.4 Temperature Sensors (drivers/hwmon/jc42.c)
++
++include <uapi/linux/fcntl.h>
++include <uapi/linux/i2c.h>
++include <uapi/linux/i2c-dev.h>
++
++resource fd_hwmon_jc42_sysfs[fd]
++resource fd_i2c_hwmon_jc42[fd]
++
++# I2C new/delete resources
++resource fd_i2c_hwmon_jc42_new[fd]
++resource fd_i2c_hwmon_jc42_delete[fd]
++
++# ==================== SYSFS INTERFACE ====================
++
++# Temperature input (millidegrees Celsius)
++sysfs_hwmon_jc42_temp_input = "/sys/class/hwmon/hwmon0/temp1_input", "/sys/class/hwmon/hwmon1/temp1_input", "/sys/class/hwmon/hwmon2/temp1_input"
++
++# Temperature limits
++sysfs_hwmon_jc42_temp_min = "/sys/class/hwmon/hwmon0/temp1_min", "/sys/class/hwmon/hwmon1/temp1_min", "/sys/class/hwmon/hwmon2/temp1_min"
++sysfs_hwmon_jc42_temp_max = "/sys/class/hwmon/hwmon0/temp1_max", "/sys/class/hwmon/hwmon1/temp1_max", "/sys/class/hwmon/hwmon2/temp1_max"
++sysfs_hwmon_jc42_temp_crit = "/sys/class/hwmon/hwmon0/temp1_crit", "/sys/class/hwmon/hwmon1/temp1_crit", "/sys/class/hwmon/hwmon2/temp1_crit"
++
++# Temperature hysteresis
++sysfs_hwmon_jc42_temp_max_hyst = "/sys/class/hwmon/hwmon0/temp1_max_hyst", "/sys/class/hwmon/hwmon1/temp1_max_hyst", "/sys/class/hwmon/hwmon2/temp1_max_hyst"
++sysfs_hwmon_jc42_temp_crit_hyst = "/sys/class/hwmon/hwmon0/temp1_crit_hyst", "/sys/class/hwmon/hwmon1/temp1_crit_hyst", "/sys/class/hwmon/hwmon2/temp1_crit_hyst"
++
++# Alarms
++sysfs_hwmon_jc42_temp_min_alarm = "/sys/class/hwmon/hwmon0/temp1_min_alarm", "/sys/class/hwmon/hwmon1/temp1_min_alarm", "/sys/class/hwmon/hwmon2/temp1_min_alarm"
++sysfs_hwmon_jc42_temp_max_alarm = "/sys/class/hwmon/hwmon0/temp1_max_alarm", "/sys/class/hwmon/hwmon1/temp1_max_alarm", "/sys/class/hwmon/hwmon2/temp1_max_alarm"
++sysfs_hwmon_jc42_temp_crit_alarm = "/sys/class/hwmon/hwmon0/temp1_crit_alarm", "/sys/class/hwmon/hwmon1/temp1_crit_alarm", "/sys/class/hwmon/hwmon2/temp1_crit_alarm"
++
++# Device name and update interval
++sysfs_hwmon_jc42_name = "/sys/class/hwmon/hwmon0/name", "/sys/class/hwmon/hwmon1/name", "/sys/class/hwmon/hwmon2/name"
++sysfs_hwmon_jc42_update_interval = "/sys/class/hwmon/hwmon0/update_interval", "/sys/class/hwmon/hwmon1/update_interval", "/sys/class/hwmon/hwmon2/update_interval"
++
++# ==================== READ-ONLY FILES ====================
++
++openat$hwmon_jc42_temp_input(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_input]], flags const[O_RDONLY], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_temp_min_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_min_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_temp_max_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_max_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_temp_crit_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_crit_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_name(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_name]], flags const[O_RDONLY], mode const[0]) fd_hwmon_jc42_sysfs
++read$hwmon_jc42_sysfs(fd fd_hwmon_jc42_sysfs, buf ptr[out, array[int8]], len bytesize[buf])
++
++# ==================== READ-WRITE FILES ====================
++
++openat$hwmon_jc42_temp_min(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_min]], flags flags[open_flags], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_temp_max(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_max]], flags flags[open_flags], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_temp_crit(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_crit]], flags flags[open_flags], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_temp_max_hyst(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_max_hyst]], flags flags[open_flags], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_temp_crit_hyst(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_temp_crit_hyst]], flags flags[open_flags], mode const[0]) fd_hwmon_jc42_sysfs
++openat$hwmon_jc42_update_interval(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_jc42_update_interval]], flags flags[open_flags], mode const[0]) fd_hwmon_jc42_sysfs
++
++# ==================== WRITE OPERATIONS ====================
++
++write$hwmon_jc42_temp_min(fd fd_hwmon_jc42_sysfs, data ptr[in, string[hwmon_jc42_temp_values]], len bytesize[data])
++write$hwmon_jc42_temp_max(fd fd_hwmon_jc42_sysfs, data ptr[in, string[hwmon_jc42_temp_values]], len bytesize[data])
++write$hwmon_jc42_temp_crit(fd fd_hwmon_jc42_sysfs, data ptr[in, string[hwmon_jc42_temp_values]], len bytesize[data])
++write$hwmon_jc42_temp_hyst(fd fd_hwmon_jc42_sysfs, data ptr[in, string[hwmon_jc42_hyst_values]], len bytesize[data])
++write$hwmon_jc42_update_interval(fd fd_hwmon_jc42_sysfs, data ptr[in, string[hwmon_jc42_interval_values]], len bytesize[data])
++
++# ==================== VALUE RANGES ====================
++
++hwmon_jc42_temp_values = "-40000", "0", "10000", "20000", "30000", "40000", "50000", "60000", "70000", "80000", "85000", "90000", "95000", "100000", "105000", "125000"
++hwmon_jc42_hyst_values = "0", "250", "500", "1000", "1500", "2000", "3000", "6000"
++hwmon_jc42_interval_values = "100", "250", "500", "1000", "2000"
++
++# ==================== I2C DEVICE INTERFACE ====================
++
++i2c_hwmon_jc42_devices = "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2"
++
++openat$i2c_hwmon_jc42(fd const[AT_FDCWD], file ptr[in, string[i2c_hwmon_jc42_devices]], flags flags[open_flags], mode const[0]) fd_i2c_hwmon_jc42
++ioctl$I2C_SLAVE_hwmon_jc42(fd fd_i2c_hwmon_jc42, cmd const[I2C_SLAVE], addr intptr[0x18:0x4f])
++ioctl$I2C_RDWR_hwmon_jc42(fd fd_i2c_hwmon_jc42, cmd const[I2C_RDWR], arg ptr[inout, i2c_rdwr_ioctl_data_hwmon_jc42])
++
++# I2C structures
++i2c_msg_hwmon_jc42 {
++    addr    int16[0x18:0x4f]
++    flags   flags[i2c_msg_flags_hwmon_jc42, int16]
++    len     len[buf, int16]
++    buf     ptr[inout, array[int8]]
++}
++
++i2c_rdwr_ioctl_data_hwmon_jc42 {
++    msgs    ptr[in, array[i2c_msg_hwmon_jc42]]
++    nmsgs   len[msgs, int32]
++}
++
++i2c_msg_flags_hwmon_jc42 = I2C_M_RD, I2C_M_TEN, I2C_M_RECV_LEN, I2C_M_NO_RD_ACK
++
++# ==================== I2C DEVICE CREATION ====================
++
++sysfs_i2c_hwmon_jc42_new = "/sys/bus/i2c/devices/i2c-0/new_device", "/sys/bus/i2c/devices/i2c-1/new_device", "/sys/bus/i2c/devices/i2c-2/new_device"
++sysfs_i2c_hwmon_jc42_delete = "/sys/bus/i2c/devices/i2c-0/delete_device", "/sys/bus/i2c/devices/i2c-1/delete_device", "/sys/bus/i2c/devices/i2c-2/delete_device"
++
++openat$i2c_hwmon_jc42_new(fd const[AT_FDCWD], file ptr[in, string[sysfs_i2c_hwmon_jc42_new]], flags const[O_WRONLY], mode const[0]) fd_i2c_hwmon_jc42_new
++openat$i2c_hwmon_jc42_delete(fd const[AT_FDCWD], file ptr[in, string[sysfs_i2c_hwmon_jc42_delete]], flags const[O_WRONLY], mode const[0]) fd_i2c_hwmon_jc42_delete
++write$i2c_hwmon_jc42_new(fd fd_i2c_hwmon_jc42_new, data ptr[in, string[hwmon_jc42_devices]], len bytesize[data])
++write$i2c_hwmon_jc42_delete(fd fd_i2c_hwmon_jc42_delete, data ptr[in, string[hwmon_jc42_addrs]], len bytesize[data])
++
++# "jc42 0x18" - static device
++hwmon_jc42_devices = "jc42 0x19", "jc42 0x1a"
++hwmon_jc42_addrs = "0x19", "0x1a"
+diff --git a/sys/linux/dev_hwmon_jc42.txt.const b/sys/linux/dev_hwmon_jc42.txt.const
+new file mode 100644
+index 0000000..e4500b0
+--- /dev/null
++++ b/sys/linux/dev_hwmon_jc42.txt.const
+@@ -0,0 +1,15 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AT_FDCWD = amd64:18446744073709551516
++I2C_M_NO_RD_ACK = amd64:2048
++I2C_M_RD = amd64:1
++I2C_M_RECV_LEN = amd64:1024
++I2C_M_TEN = amd64:16
++I2C_RDWR = amd64:1799
++I2C_SLAVE = amd64:1795
++O_RDONLY = amd64:0
++O_WRONLY = amd64:1
++__NR_ioctl = amd64:16
++__NR_openat = amd64:257
++__NR_read = amd64:0
++__NR_write = amd64:1
+-- 
+2.50.1
+
