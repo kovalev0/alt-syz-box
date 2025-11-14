@@ -149,6 +149,20 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e 9P_FS -e 9P_FS_POSIX_ACL \
     -e NET_9P -e NET_9P_VIRTIO
 
+# ---------------------------------------------------
+# drivers_pps
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e PPS -e NTP_PPS -e PPS_DEBUG
+
+# 6.14+
+#./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+#    -e PPS_GENERATOR -e PPS_GENERATOR_DUMMY
+
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e PPS_CLIENT_KTIMER -e PPS_CLIENT_LDISC
+
+# ---------------------------------------------------
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \

@@ -1,0 +1,177 @@
+From 1b0613d3113f77addf45d5fa6ba5ea6f8c87e1cd Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Fri, 14 Nov 2025 09:06:21 +0000
+Subject: [PATCH] sys/linux: add dev/pps* descriptions
+
+---
+ sys/linux/dev_pps.txt       | 119 ++++++++++++++++++++++++++++++++++++
+ sys/linux/dev_pps.txt.const |  31 ++++++++++
+ 2 files changed, 150 insertions(+)
+ create mode 100644 sys/linux/dev_pps.txt
+ create mode 100644 sys/linux/dev_pps.txt.const
+
+diff --git a/sys/linux/dev_pps.txt b/sys/linux/dev_pps.txt
+new file mode 100644
+index 0000000..bbf1a60
+--- /dev/null
++++ b/sys/linux/dev_pps.txt
+@@ -0,0 +1,119 @@
++include <uapi/asm/ioctl.h>
++include <uapi/linux/fcntl.h>
++include <uapi/linux/pps.h>
++## v6.14+ include <uapi/linux/pps_gen.h>
++include <uapi/linux/tty.h>
++include <uapi/asm-generic/ioctls.h>
++
++# ==================== PPS ====================
++
++resource fd_pps[fd]
++
++pps_devices = "/dev/pps0", "/dev/pps1"
++
++openat$pps(fd const[AT_FDCWD], file ptr[in, string[pps_devices]], flags flags[open_flags], mode const[0]) fd_pps
++
++close$pps(fd fd_pps)
++
++ioctl$PPS_GETPARAMS(fd fd_pps, cmd const[PPS_GETPARAMS], arg ptr[out, pps_kparams])
++ioctl$PPS_SETPARAMS(fd fd_pps, cmd const[PPS_SETPARAMS], arg ptr[in, pps_kparams])
++ioctl$PPS_GETCAP(fd fd_pps, cmd const[PPS_GETCAP], arg ptr[out, int32])
++ioctl$PPS_FETCH(fd fd_pps, cmd const[PPS_FETCH], arg ptr[inout, pps_fdata])
++ioctl$PPS_KC_BIND(fd fd_pps, cmd const[PPS_KC_BIND], arg ptr[in, pps_bind_args])
++
++pps_ktime {
++    sec     int64
++    nsec    int32
++    flags   int32
++}
++
++pps_kinfo {
++    assert_sequence int32
++    clear_sequence  int32
++    assert_tu       pps_ktime
++    clear_tu        pps_ktime
++    current_mode    int32
++}
++
++pps_kparams {
++    api_version     flags[pps_api_version, int32]
++    mode            flags[pps_mode, int32]
++    assert_off_tu   pps_ktime
++    clear_off_tu    pps_ktime
++}
++
++pps_fdata {
++    info    pps_kinfo
++    timeout pps_ktime
++}
++
++pps_bind_args {
++    tsformat    flags[pps_tsformat, int32]
++    edge        flags[pps_edge,	int32]
++    consumer    flags[pps_consumer, int32]
++}
++
++pps_api_version = PPS_API_VERS_1
++
++pps_mode = PPS_CAPTUREASSERT, PPS_CAPTURECLEAR, PPS_CAPTUREBOTH, PPS_OFFSETASSERT, PPS_OFFSETCLEAR, PPS_CANWAIT, PPS_CANPOLL, PPS_ECHOASSERT, PPS_ECHOCLEAR, PPS_TSFMT_TSPEC, PPS_TSFMT_NTPFP
++
++pps_tsformat = PPS_TSFMT_TSPEC, PPS_TSFMT_NTPFP
++pps_edge = PPS_CAPTUREASSERT, PPS_CAPTURECLEAR, PPS_CAPTUREBOTH
++pps_consumer = PPS_KC_HARDPPS, PPS_KC_HARDPPS_PLL, PPS_KC_HARDPPS_FLL
++
++openat$pps_sysfs_assert(fd const[AT_FDCWD], file ptr[in, string[pps_sysfs_assert_paths]], flags flags[open_flags], mode const[0]) fd
++openat$pps_sysfs_clear(fd const[AT_FDCWD], file ptr[in, string[pps_sysfs_clear_paths]], flags flags[open_flags], mode const[0]) fd
++openat$pps_sysfs_echo(fd const[AT_FDCWD], file ptr[in, string[pps_sysfs_echo_paths]], flags flags[open_flags], mode const[0]) fd
++openat$pps_sysfs_mode(fd const[AT_FDCWD], file ptr[in, string[pps_sysfs_mode_paths]], flags flags[open_flags], mode const[0]) fd
++openat$pps_sysfs_name(fd const[AT_FDCWD], file ptr[in, string[pps_sysfs_name_paths]], flags flags[open_flags], mode const[0]) fd
++openat$pps_sysfs_path(fd const[AT_FDCWD], file ptr[in, string[pps_sysfs_path_paths]], flags flags[open_flags], mode const[0]) fd
++
++read$pps_sysfs(fd fd, buf ptr[out, array[int8]], len bytesize[buf])
++
++pps_sysfs_assert_paths = "/sys/class/pps/pps0/assert", "/sys/class/pps/pps1/assert"
++pps_sysfs_clear_paths = "/sys/class/pps/pps0/clear", "/sys/class/pps/pps1/clear"
++pps_sysfs_echo_paths = "/sys/class/pps/pps0/echo", "/sys/class/pps/pps1/echo"
++pps_sysfs_mode_paths = "/sys/class/pps/pps0/mode", "/sys/class/pps/pps1/mode"
++pps_sysfs_name_paths = "/sys/class/pps/pps0/name", "/sys/class/pps/pps1/name"
++pps_sysfs_path_paths = "/sys/class/pps/pps0/path", "/sys/class/pps/pps1/path"
++
++# ==================== PPS GENERATOR ====================
++# v6.14+
++# resource fd_pps_gen[fd]
++#
++# pps_gen_devices = "/dev/pps-gen0"
++#
++# openat$pps_gen(fd const[AT_FDCWD], file ptr[in, string[pps_gen_devices]], flags flags[open_flags], mode const[0]) fd_pps_gen
++#
++# close$pps_gen(fd fd_pps_gen)
++#
++# ioctl$PPS_GEN_SETENABLE(fd fd_pps_gen, cmd const[PPS_GEN_SETENABLE], arg ptr[in, int32])
++# ioctl$PPS_GEN_USESYSTEMCLOCK(fd fd_pps_gen, cmd const[PPS_GEN_USESYSTEMCLOCK], arg ptr[out, int32])
++# ioctl$PPS_GEN_FETCHEVENT(fd fd_pps_gen, cmd const[PPS_GEN_FETCHEVENT], arg ptr[in, pps_gen_event])
++#
++# pps_gen_event {
++#	event		int32
++#	sequence	int32
++# }
++#
++# openat$pps_sysfs_gen_enable(fd const[AT_FDCWD], file ptr[in, string["/sys/class/pps-gen/pps-gen0/enable"]], flags const[O_WRONLY], mode const[0]) fd
++#
++# write$pps_sysfs_gen_enable(fd fd, buf ptr[in, stringnoz[pps_gen_enable_values]], len bytesize[buf])
++#
++# pps_gen_enable_values = "0", "1"
++
++# ==================== PPS LINE DISCIPLINE ====================
++
++resource fd_pps_tty[fd]
++
++pps_tty_devices = "/dev/ttyS0", "/dev/ttyS1", "/dev/ttyS2", "/dev/ttyS3", "/dev/console"
++
++openat$pps_tty(fd const[AT_FDCWD], file ptr[in, string[pps_tty_devices]], flags flags[open_flags], mode const[0]) fd_pps_tty
++
++close$pps_tty(fd fd_pps_tty)
++
++ioctl$TIOCSETD_PPS(fd fd_pps_tty, cmd const[TIOCSETD], arg ptr[in, const[N_PPS, int32]])
++ioctl$TIOCGETD_PPS(fd fd_pps_tty, cmd const[TIOCGETD], arg ptr[out, int32])
++
++write$pps_tty(fd fd_pps_tty, data ptr[in, array[int8]], len bytesize[data])
++read$pps_tty(fd fd_pps_tty, buf ptr[out, array[int8]], len bytesize[buf])
+diff --git a/sys/linux/dev_pps.txt.const b/sys/linux/dev_pps.txt.const
+new file mode 100644
+index 0000000..ba8019c
+--- /dev/null
++++ b/sys/linux/dev_pps.txt.const
+@@ -0,0 +1,31 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AT_FDCWD = amd64:18446744073709551516
++N_PPS = amd64:18
++PPS_API_VERS_1 = amd64:1
++PPS_CANPOLL = amd64:512
++PPS_CANWAIT = amd64:256
++PPS_CAPTUREASSERT = amd64:1
++PPS_CAPTUREBOTH = amd64:3
++PPS_CAPTURECLEAR = amd64:2
++PPS_ECHOASSERT = amd64:64
++PPS_ECHOCLEAR = amd64:128
++PPS_FETCH = amd64:3221778596
++PPS_GETCAP = amd64:2148036771
++PPS_GETPARAMS = amd64:2148036769
++PPS_KC_BIND = amd64:1074294949
++PPS_KC_HARDPPS = amd64:0
++PPS_KC_HARDPPS_FLL = amd64:2
++PPS_KC_HARDPPS_PLL = amd64:1
++PPS_OFFSETASSERT = amd64:16
++PPS_OFFSETCLEAR = amd64:32
++PPS_SETPARAMS = amd64:1074294946
++PPS_TSFMT_NTPFP = amd64:8192
++PPS_TSFMT_TSPEC = amd64:4096
++TIOCGETD = amd64:21540
++TIOCSETD = amd64:21539
++__NR_close = amd64:3
++__NR_ioctl = amd64:16
++__NR_openat = amd64:257
++__NR_read = amd64:0
++__NR_write = amd64:1
+-- 
+2.50.1
+
