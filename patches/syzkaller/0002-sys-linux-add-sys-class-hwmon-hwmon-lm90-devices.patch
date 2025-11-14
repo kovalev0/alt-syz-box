@@ -1,0 +1,254 @@
+From b04ad009a9f318aeec2073425d05e093c3f0a0f1 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Thu, 20 Nov 2025 16:38:09 +0000
+Subject: [PATCH] sys/linux: add sys/class/hwmon/hwmon* lm90 devices
+
+---
+ sys/linux/dev_hwmon_lm90.txt       | 209 +++++++++++++++++++++++++++++
+ sys/linux/dev_hwmon_lm90.txt.const |  18 +++
+ 2 files changed, 227 insertions(+)
+ create mode 100644 sys/linux/dev_hwmon_lm90.txt
+ create mode 100644 sys/linux/dev_hwmon_lm90.txt.const
+
+diff --git a/sys/linux/dev_hwmon_lm90.txt b/sys/linux/dev_hwmon_lm90.txt
+new file mode 100644
+index 0000000..9aa599b
+--- /dev/null
++++ b/sys/linux/dev_hwmon_lm90.txt
+@@ -0,0 +1,209 @@
++# LM90 Temperature Sensor Driver (drivers/hwmon/lm90.c)
++# Supports LM90, LM86, LM89, LM99, ADM1032, MAX6657/58/59, MAX6680/81,
++# MAX6695/96, ADT7461/81/82/83, NCT72/210/214/218, and many others
++
++include <uapi/linux/fcntl.h>
++include <uapi/linux/i2c.h>
++include <uapi/linux/i2c-dev.h>
++
++resource fd_hwmon_lm90_sysfs[fd]
++resource fd_i2c_hwmon_lm90[fd]
++resource fd_i2c_hwmon_lm90_new[fd]
++resource fd_i2c_hwmon_lm90_delete[fd]
++
++# ==================== SYSFS INTERFACE ====================
++
++# Temperature inputs (local and remote sensors)
++sysfs_hwmon_lm90_temp1_input = "/sys/class/hwmon/hwmon0/temp1_input", "/sys/class/hwmon/hwmon1/temp1_input", "/sys/class/hwmon/hwmon2/temp1_input", "/sys/class/hwmon/hwmon3/temp1_input", "/sys/class/hwmon/hwmon4/temp1_input"
++sysfs_hwmon_lm90_temp2_input = "/sys/class/hwmon/hwmon0/temp2_input", "/sys/class/hwmon/hwmon1/temp2_input", "/sys/class/hwmon/hwmon2/temp2_input", "/sys/class/hwmon/hwmon3/temp2_input", "/sys/class/hwmon/hwmon4/temp2_input"
++sysfs_hwmon_lm90_temp3_input = "/sys/class/hwmon/hwmon0/temp3_input", "/sys/class/hwmon/hwmon1/temp3_input", "/sys/class/hwmon/hwmon2/temp3_input", "/sys/class/hwmon/hwmon3/temp3_input", "/sys/class/hwmon/hwmon4/temp3_input"
++
++# Temperature limits (min/max)
++sysfs_hwmon_lm90_temp1_min = "/sys/class/hwmon/hwmon0/temp1_min", "/sys/class/hwmon/hwmon1/temp1_min", "/sys/class/hwmon/hwmon2/temp1_min", "/sys/class/hwmon/hwmon3/temp1_min", "/sys/class/hwmon/hwmon4/temp1_min"
++sysfs_hwmon_lm90_temp1_max = "/sys/class/hwmon/hwmon0/temp1_max", "/sys/class/hwmon/hwmon1/temp1_max", "/sys/class/hwmon/hwmon2/temp1_max", "/sys/class/hwmon/hwmon3/temp1_max", "/sys/class/hwmon/hwmon4/temp1_max"
++sysfs_hwmon_lm90_temp2_min = "/sys/class/hwmon/hwmon0/temp2_min", "/sys/class/hwmon/hwmon1/temp2_min", "/sys/class/hwmon/hwmon2/temp2_min", "/sys/class/hwmon/hwmon3/temp2_min", "/sys/class/hwmon/hwmon4/temp2_min"
++sysfs_hwmon_lm90_temp2_max = "/sys/class/hwmon/hwmon0/temp2_max", "/sys/class/hwmon/hwmon1/temp2_max", "/sys/class/hwmon/hwmon2/temp2_max", "/sys/class/hwmon/hwmon3/temp2_max", "/sys/class/hwmon/hwmon4/temp2_max"
++sysfs_hwmon_lm90_temp3_min = "/sys/class/hwmon/hwmon0/temp3_min", "/sys/class/hwmon/hwmon1/temp3_min", "/sys/class/hwmon/hwmon2/temp3_min", "/sys/class/hwmon/hwmon3/temp3_min", "/sys/class/hwmon/hwmon4/temp3_min"
++sysfs_hwmon_lm90_temp3_max = "/sys/class/hwmon/hwmon0/temp3_max", "/sys/class/hwmon/hwmon1/temp3_max", "/sys/class/hwmon/hwmon2/temp3_max", "/sys/class/hwmon/hwmon3/temp3_max", "/sys/class/hwmon/hwmon4/temp3_max"
++
++# Critical temperature limits
++sysfs_hwmon_lm90_temp1_crit = "/sys/class/hwmon/hwmon0/temp1_crit", "/sys/class/hwmon/hwmon1/temp1_crit", "/sys/class/hwmon/hwmon2/temp1_crit", "/sys/class/hwmon/hwmon3/temp1_crit", "/sys/class/hwmon/hwmon4/temp1_crit"
++sysfs_hwmon_lm90_temp2_crit = "/sys/class/hwmon/hwmon0/temp2_crit", "/sys/class/hwmon/hwmon1/temp2_crit", "/sys/class/hwmon/hwmon2/temp2_crit", "/sys/class/hwmon/hwmon3/temp2_crit", "/sys/class/hwmon/hwmon4/temp2_crit"
++sysfs_hwmon_lm90_temp3_crit = "/sys/class/hwmon/hwmon0/temp3_crit", "/sys/class/hwmon/hwmon1/temp3_crit", "/sys/class/hwmon/hwmon2/temp3_crit", "/sys/class/hwmon/hwmon3/temp3_crit", "/sys/class/hwmon/hwmon4/temp3_crit"
++
++# Critical hysteresis
++sysfs_hwmon_lm90_temp1_crit_hyst = "/sys/class/hwmon/hwmon0/temp1_crit_hyst", "/sys/class/hwmon/hwmon1/temp1_crit_hyst", "/sys/class/hwmon/hwmon2/temp1_crit_hyst", "/sys/class/hwmon/hwmon3/temp1_crit_hyst", "/sys/class/hwmon/hwmon4/temp1_crit_hyst"
++sysfs_hwmon_lm90_temp2_crit_hyst = "/sys/class/hwmon/hwmon0/temp2_crit_hyst", "/sys/class/hwmon/hwmon1/temp2_crit_hyst", "/sys/class/hwmon/hwmon2/temp2_crit_hyst", "/sys/class/hwmon/hwmon3/temp2_crit_hyst", "/sys/class/hwmon/hwmon4/temp2_crit_hyst"
++sysfs_hwmon_lm90_temp3_crit_hyst = "/sys/class/hwmon/hwmon0/temp3_crit_hyst", "/sys/class/hwmon/hwmon1/temp3_crit_hyst", "/sys/class/hwmon/hwmon2/temp3_crit_hyst", "/sys/class/hwmon/hwmon3/temp3_crit_hyst", "/sys/class/hwmon/hwmon4/temp3_crit_hyst"
++
++# Emergency temperature limits (MAX6659, MAX6695/96)
++sysfs_hwmon_lm90_temp1_emergency = "/sys/class/hwmon/hwmon0/temp1_emergency", "/sys/class/hwmon/hwmon1/temp1_emergency", "/sys/class/hwmon/hwmon2/temp1_emergency", "/sys/class/hwmon/hwmon3/temp1_emergency", "/sys/class/hwmon/hwmon4/temp1_emergency"
++sysfs_hwmon_lm90_temp2_emergency = "/sys/class/hwmon/hwmon0/temp2_emergency", "/sys/class/hwmon/hwmon1/temp2_emergency", "/sys/class/hwmon/hwmon2/temp2_emergency", "/sys/class/hwmon/hwmon3/temp2_emergency", "/sys/class/hwmon/hwmon4/temp2_emergency"
++sysfs_hwmon_lm90_temp3_emergency = "/sys/class/hwmon/hwmon0/temp3_emergency", "/sys/class/hwmon/hwmon1/temp3_emergency", "/sys/class/hwmon/hwmon2/temp3_emergency", "/sys/class/hwmon/hwmon3/temp3_emergency", "/sys/class/hwmon/hwmon4/temp3_emergency"
++
++# Emergency hysteresis
++sysfs_hwmon_lm90_temp1_emergency_hyst = "/sys/class/hwmon/hwmon0/temp1_emergency_hyst", "/sys/class/hwmon/hwmon1/temp1_emergency_hyst", "/sys/class/hwmon/hwmon2/temp1_emergency_hyst", "/sys/class/hwmon/hwmon3/temp1_emergency_hyst", "/sys/class/hwmon/hwmon4/temp1_emergency_hyst"
++sysfs_hwmon_lm90_temp2_emergency_hyst = "/sys/class/hwmon/hwmon0/temp2_emergency_hyst", "/sys/class/hwmon/hwmon1/temp2_emergency_hyst", "/sys/class/hwmon/hwmon2/temp2_emergency_hyst", "/sys/class/hwmon/hwmon3/temp2_emergency_hyst", "/sys/class/hwmon/hwmon4/temp2_emergency_hyst"
++sysfs_hwmon_lm90_temp3_emergency_hyst = "/sys/class/hwmon/hwmon0/temp3_emergency_hyst", "/sys/class/hwmon/hwmon1/temp3_emergency_hyst", "/sys/class/hwmon/hwmon2/temp3_emergency_hyst", "/sys/class/hwmon/hwmon3/temp3_emergency_hyst", "/sys/class/hwmon/hwmon4/temp3_emergency_hyst"
++
++# Alarms
++sysfs_hwmon_lm90_temp1_min_alarm = "/sys/class/hwmon/hwmon0/temp1_min_alarm", "/sys/class/hwmon/hwmon1/temp1_min_alarm", "/sys/class/hwmon/hwmon2/temp1_min_alarm", "/sys/class/hwmon/hwmon3/temp1_min_alarm", "/sys/class/hwmon/hwmon4/temp1_min_alarm"
++sysfs_hwmon_lm90_temp1_max_alarm = "/sys/class/hwmon/hwmon0/temp1_max_alarm", "/sys/class/hwmon/hwmon1/temp1_max_alarm", "/sys/class/hwmon/hwmon2/temp1_max_alarm", "/sys/class/hwmon/hwmon3/temp1_max_alarm", "/sys/class/hwmon/hwmon4/temp1_max_alarm"
++sysfs_hwmon_lm90_temp1_crit_alarm = "/sys/class/hwmon/hwmon0/temp1_crit_alarm", "/sys/class/hwmon/hwmon1/temp1_crit_alarm", "/sys/class/hwmon/hwmon2/temp1_crit_alarm", "/sys/class/hwmon/hwmon3/temp1_crit_alarm", "/sys/class/hwmon/hwmon4/temp1_crit_alarm"
++sysfs_hwmon_lm90_temp1_emergency_alarm = "/sys/class/hwmon/hwmon0/temp1_emergency_alarm", "/sys/class/hwmon/hwmon1/temp1_emergency_alarm", "/sys/class/hwmon/hwmon2/temp1_emergency_alarm", "/sys/class/hwmon/hwmon3/temp1_emergency_alarm", "/sys/class/hwmon/hwmon4/temp1_emergency_alarm"
++
++sysfs_hwmon_lm90_temp2_min_alarm = "/sys/class/hwmon/hwmon0/temp2_min_alarm", "/sys/class/hwmon/hwmon1/temp2_min_alarm", "/sys/class/hwmon/hwmon2/temp2_min_alarm", "/sys/class/hwmon/hwmon3/temp2_min_alarm", "/sys/class/hwmon/hwmon4/temp2_min_alarm"
++sysfs_hwmon_lm90_temp2_max_alarm = "/sys/class/hwmon/hwmon0/temp2_max_alarm", "/sys/class/hwmon/hwmon1/temp2_max_alarm", "/sys/class/hwmon/hwmon2/temp2_max_alarm", "/sys/class/hwmon/hwmon3/temp2_max_alarm", "/sys/class/hwmon/hwmon4/temp2_max_alarm"
++sysfs_hwmon_lm90_temp2_crit_alarm = "/sys/class/hwmon/hwmon0/temp2_crit_alarm", "/sys/class/hwmon/hwmon1/temp2_crit_alarm", "/sys/class/hwmon/hwmon2/temp2_crit_alarm", "/sys/class/hwmon/hwmon3/temp2_crit_alarm", "/sys/class/hwmon/hwmon4/temp2_crit_alarm"
++sysfs_hwmon_lm90_temp2_emergency_alarm = "/sys/class/hwmon/hwmon0/temp2_emergency_alarm", "/sys/class/hwmon/hwmon1/temp2_emergency_alarm", "/sys/class/hwmon/hwmon2/temp2_emergency_alarm", "/sys/class/hwmon/hwmon3/temp2_emergency_alarm", "/sys/class/hwmon/hwmon4/temp2_emergency_alarm"
++sysfs_hwmon_lm90_temp2_fault = "/sys/class/hwmon/hwmon0/temp2_fault", "/sys/class/hwmon/hwmon1/temp2_fault", "/sys/class/hwmon/hwmon2/temp2_fault", "/sys/class/hwmon/hwmon3/temp2_fault", "/sys/class/hwmon/hwmon4/temp2_fault"
++
++sysfs_hwmon_lm90_temp3_min_alarm = "/sys/class/hwmon/hwmon0/temp3_min_alarm", "/sys/class/hwmon/hwmon1/temp3_min_alarm", "/sys/class/hwmon/hwmon2/temp3_min_alarm", "/sys/class/hwmon/hwmon3/temp3_min_alarm", "/sys/class/hwmon/hwmon4/temp3_min_alarm"
++sysfs_hwmon_lm90_temp3_max_alarm = "/sys/class/hwmon/hwmon0/temp3_max_alarm", "/sys/class/hwmon/hwmon1/temp3_max_alarm", "/sys/class/hwmon/hwmon2/temp3_max_alarm", "/sys/class/hwmon/hwmon3/temp3_max_alarm", "/sys/class/hwmon/hwmon4/temp3_max_alarm"
++sysfs_hwmon_lm90_temp3_crit_alarm = "/sys/class/hwmon/hwmon0/temp3_crit_alarm", "/sys/class/hwmon/hwmon1/temp3_crit_alarm", "/sys/class/hwmon/hwmon2/temp3_crit_alarm", "/sys/class/hwmon/hwmon3/temp3_crit_alarm", "/sys/class/hwmon/hwmon4/temp3_crit_alarm"
++sysfs_hwmon_lm90_temp3_emergency_alarm = "/sys/class/hwmon/hwmon0/temp3_emergency_alarm", "/sys/class/hwmon/hwmon1/temp3_emergency_alarm", "/sys/class/hwmon/hwmon2/temp3_emergency_alarm", "/sys/class/hwmon/hwmon3/temp3_emergency_alarm", "/sys/class/hwmon/hwmon4/temp3_emergency_alarm"
++sysfs_hwmon_lm90_temp3_fault = "/sys/class/hwmon/hwmon0/temp3_fault", "/sys/class/hwmon/hwmon1/temp3_fault", "/sys/class/hwmon/hwmon2/temp3_fault", "/sys/class/hwmon/hwmon3/temp3_fault", "/sys/class/hwmon/hwmon4/temp3_fault"
++
++# Combined alarms register
++sysfs_hwmon_lm90_alarms = "/sys/class/hwmon/hwmon0/alarms", "/sys/class/hwmon/hwmon1/alarms", "/sys/class/hwmon/hwmon2/alarms", "/sys/class/hwmon/hwmon3/alarms", "/sys/class/hwmon/hwmon4/alarms"
++
++# Device name and control
++sysfs_hwmon_lm90_name = "/sys/class/hwmon/hwmon0/name", "/sys/class/hwmon/hwmon1/name", "/sys/class/hwmon/hwmon2/name", "/sys/class/hwmon/hwmon3/name", "/sys/class/hwmon/hwmon4/name"
++sysfs_hwmon_lm90_update_interval = "/sys/class/hwmon/hwmon0/update_interval", "/sys/class/hwmon/hwmon1/update_interval", "/sys/class/hwmon/hwmon2/update_interval", "/sys/class/hwmon/hwmon3/update_interval", "/sys/class/hwmon/hwmon4/update_interval"
++sysfs_hwmon_lm90_temp_samples = "/sys/class/hwmon/hwmon0/temp_samples", "/sys/class/hwmon/hwmon1/temp_samples", "/sys/class/hwmon/hwmon2/temp_samples", "/sys/class/hwmon/hwmon3/temp_samples", "/sys/class/hwmon/hwmon4/temp_samples"
++
++# ==================== READ-ONLY FILES ====================
++
++# Temperature inputs
++openat$hwmon_lm90_temp1_input(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_input]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_input(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_input]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_input(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_input]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++
++# Alarms (read-only)
++openat$hwmon_lm90_temp1_min_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_min_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp1_max_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_max_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp1_crit_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_crit_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp1_emergency_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_emergency_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++
++openat$hwmon_lm90_temp2_min_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_min_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_max_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_max_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_crit_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_crit_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_emergency_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_emergency_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_fault(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_fault]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++
++openat$hwmon_lm90_temp3_min_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_min_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_max_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_max_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_crit_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_crit_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_emergency_alarm(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_emergency_alarm]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_fault(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_fault]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++
++openat$hwmon_lm90_alarms(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_alarms]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_name(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_name]], flags const[O_RDONLY], mode const[0]) fd_hwmon_lm90_sysfs
++
++# Generic read
++read$hwmon_lm90_sysfs(fd fd_hwmon_lm90_sysfs, buf ptr[out, array[int8]], len bytesize[buf])
++
++# ==================== READ-WRITE FILES ====================
++
++# Temperature limits
++openat$hwmon_lm90_temp1_min(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_min]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp1_max(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_max]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp1_crit(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_crit]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp1_crit_hyst(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_crit_hyst]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp1_emergency(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_emergency]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp1_emergency_hyst(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp1_emergency_hyst]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++
++openat$hwmon_lm90_temp2_min(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_min]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_max(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_max]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_crit(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_crit]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_crit_hyst(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_crit_hyst]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_emergency(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_emergency]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp2_emergency_hyst(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp2_emergency_hyst]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++
++openat$hwmon_lm90_temp3_min(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_min]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_max(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_max]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_crit(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_crit]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_crit_hyst(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_crit_hyst]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_emergency(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_emergency]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp3_emergency_hyst(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp3_emergency_hyst]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++
++# Control parameters
++openat$hwmon_lm90_update_interval(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_update_interval]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++openat$hwmon_lm90_temp_samples(fd const[AT_FDCWD], file ptr[in, string[sysfs_hwmon_lm90_temp_samples]], flags flags[open_flags], mode const[0]) fd_hwmon_lm90_sysfs
++
++# ==================== WRITE OPERATIONS ====================
++
++write$hwmon_lm90_temp_min(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_temp_values]], len bytesize[data])
++write$hwmon_lm90_temp_max(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_temp_values]], len bytesize[data])
++write$hwmon_lm90_temp_crit(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_temp_values]], len bytesize[data])
++write$hwmon_lm90_temp_crit_hyst(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_temp_values]], len bytesize[data])
++write$hwmon_lm90_temp_emergency(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_temp_values]], len bytesize[data])
++write$hwmon_lm90_temp_offset(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_offset_values]], len bytesize[data])
++write$hwmon_lm90_update_interval(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_interval_values]], len bytesize[data])
++write$hwmon_lm90_temp_samples(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_samples_values]], len bytesize[data])
++write$hwmon_lm90_pec(fd fd_hwmon_lm90_sysfs, data ptr[in, string[hwmon_lm90_pec_values]], len bytesize[data])
++
++# ==================== VALUE RANGES ====================
++
++# Temperature values in millidegrees Celsius
++# LM90 supports -64°C to +191°C in extended mode, -128°C to +127°C in standard mode
++hwmon_lm90_temp_values = "-64000", "-40000", "-20000", "0", "10000", "20000", "25000", "30000", "40000", "50000", "60000", "70000", "75000", "80000", "85000", "90000", "95000", "100000", "105000", "110000", "120000", "125000", "127000", "150000", "191000"
++
++# Offset values (-64°C to +63.9375°C with 0.0625°C resolution)
++hwmon_lm90_offset_values = "-64000", "-32000", "-16000", "-8000", "-4000", "-2000", "-1000", "0", "1000", "2000", "4000", "8000", "16000", "32000", "63937"
++
++# Update interval values in milliseconds (based on conversion rates)
++# LM90 supports rates from 16Hz (62.5ms) to 0.0625Hz (16000ms)
++hwmon_lm90_interval_values = "62", "125", "250", "500", "1000", "2000", "4000", "8000", "16000"
++
++# Fault queue depth (number of consecutive measurements before alarm)
++hwmon_lm90_samples_values = "1", "2", "3", "4"
++
++# PEC (Packet Error Checking) enable/disable
++hwmon_lm90_pec_values = "0", "1"
++
++# ==================== I2C DEVICE INTERFACE ====================
++
++i2c_hwmon_lm90_devices = "/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-2", "/dev/i2c-3", "/dev/i2c-4"
++
++openat$i2c_hwmon_lm90(fd const[AT_FDCWD], file ptr[in, string[i2c_hwmon_lm90_devices]], flags flags[open_flags], mode const[0]) fd_i2c_hwmon_lm90
++
++# LM90 family uses multiple I2C addresses depending on chip variant
++ioctl$I2C_SLAVE_hwmon_lm90(fd fd_i2c_hwmon_lm90, cmd const[I2C_SLAVE], addr flags[lm90_i2c_addresses])
++ioctl$I2C_RDWR_hwmon_lm90(fd fd_i2c_hwmon_lm90, cmd const[I2C_RDWR], arg ptr[inout, i2c_rdwr_ioctl_data_hwmon_lm90])
++
++lm90_i2c_addresses = 0x18, 0x19, 0x1a, 0x29, 0x2a, 0x2b, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f
++
++# I2C message structures
++i2c_msg_hwmon_lm90 {
++    addr    flags[lm90_i2c_addresses, int16]
++    flags   flags[i2c_msg_flags_hwmon_lm90, int16]
++    len     len[buf, int16]
++    buf     ptr[inout, array[int8]]
++}
++
++i2c_rdwr_ioctl_data_hwmon_lm90 {
++    msgs    ptr[in, array[i2c_msg_hwmon_lm90]]
++    nmsgs   len[msgs, int32]
++}
++
++i2c_msg_flags_hwmon_lm90 = I2C_M_RD, I2C_M_TEN, I2C_M_RECV_LEN, I2C_M_NO_RD_ACK, I2C_M_IGNORE_NAK, I2C_M_REV_DIR_ADDR, I2C_M_NOSTART
++
++# ==================== I2C DEVICE CREATION ====================
++
++sysfs_i2c_hwmon_lm90_new = "/sys/bus/i2c/devices/i2c-0/new_device", "/sys/bus/i2c/devices/i2c-1/new_device", "/sys/bus/i2c/devices/i2c-2/new_device", "/sys/bus/i2c/devices/i2c-3/new_device", "/sys/bus/i2c/devices/i2c-4/new_device"
++sysfs_i2c_hwmon_lm90_delete = "/sys/bus/i2c/devices/i2c-0/delete_device", "/sys/bus/i2c/devices/i2c-1/delete_device", "/sys/bus/i2c/devices/i2c-2/delete_device", "/sys/bus/i2c/devices/i2c-3/delete_device", "/sys/bus/i2c/devices/i2c-4/delete_device"
++
++openat$i2c_hwmon_lm90_new(fd const[AT_FDCWD], file ptr[in, string[sysfs_i2c_hwmon_lm90_new]], flags const[O_WRONLY], mode const[0]) fd_i2c_hwmon_lm90_new
++openat$i2c_hwmon_lm90_delete(fd const[AT_FDCWD], file ptr[in, string[sysfs_i2c_hwmon_lm90_delete]], flags const[O_WRONLY], mode const[0]) fd_i2c_hwmon_lm90_delete
++
++write$i2c_hwmon_lm90_new(fd fd_i2c_hwmon_lm90_new, data ptr[in, string[hwmon_lm90_devices]], len bytesize[data])
++write$i2c_hwmon_lm90_delete(fd fd_i2c_hwmon_lm90_delete, data ptr[in, string[hwmon_lm90_addrs]], len bytesize[data])
++
++# Supported device names and addresses
++hwmon_lm90_devices = "lm90 0x4a", "lm86 0x4b", "lm89 0x4c", "lm99 0x4a", "adm1032 0x4b", "max6657 0x4c", "max6658 0x4a", "max6659 0x4b", "max6680 0x4c", "max6681 0x4a", "max6695 0x4b", "adt7461 0x4c", "adt7461a 0x4a", "adt7482 0x4b", "adt7483a 0x4c", "nct1008 0x4a", "nct72 0x4b", "nct210 0x4c", "nct214 0x4a", "nct218 0x4b", "w83l771 0x4c", "sa56004 0x4a", "tmp451 0x4b", "tmp461 0x4c", "max6646 0x4a", "max6647 0x4b", "max6648 0x4c", "max6649 0x4a", "max6654 0x4b", "g781 0x4c", "lm84 0x4a"
++
++# Static devices:
++# 0x48 max6696
++# 0x49 adt7481
++hwmon_lm90_addrs = "0x4a", "0x4b", "0x4c"
+diff --git a/sys/linux/dev_hwmon_lm90.txt.const b/sys/linux/dev_hwmon_lm90.txt.const
+new file mode 100644
+index 0000000..39f02e3
+--- /dev/null
++++ b/sys/linux/dev_hwmon_lm90.txt.const
+@@ -0,0 +1,18 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AT_FDCWD = amd64:18446744073709551516
++I2C_M_IGNORE_NAK = amd64:4096
++I2C_M_NOSTART = amd64:16384
++I2C_M_NO_RD_ACK = amd64:2048
++I2C_M_RD = amd64:1
++I2C_M_RECV_LEN = amd64:1024
++I2C_M_REV_DIR_ADDR = amd64:8192
++I2C_M_TEN = amd64:16
++I2C_RDWR = amd64:1799
++I2C_SLAVE = amd64:1795
++O_RDONLY = amd64:0
++O_WRONLY = amd64:1
++__NR_ioctl = amd64:16
++__NR_openat = amd64:257
++__NR_read = amd64:0
++__NR_write = amd64:1
+-- 
+2.50.1
+

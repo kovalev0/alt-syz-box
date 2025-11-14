@@ -1,0 +1,43 @@
+{
+    "target": "linux/amd64",
+    "http": "0.0.0.0:${DEFAULT_SYZ_HTTP_INTERNAL_PORT}",
+    "workdir": "${SYZKALLER_WORKDIR}",
+    "kernel_obj": "${KERNEL_BUILD_DIR}",
+    "kernel_src": "${KERNEL_DIR}",
+    "image": "${IMAGE_PATH}",
+    "sshkey": "${SSH_KEY_PATH}",
+    "ssh_user": "root",
+    "syzkaller": "${SYZKALLER_DIR}",
+    "procs": 16,
+    "type": "qemu",
+    "sandbox": "none",
+    "cover": true,
+    "execprog_bin_on_target": "/bin/linux_amd64/syz-execprog",
+    "executor_bin_on_target": "/bin/linux_amd64/syz-executor",
+    "vm": {
+	"qemu": "${QEMU_BUILD_DIR}/usr/bin/qemu-system-x86_64",
+        "count": 4,
+        "qemu_args": "-enable-kvm",
+        "kernel": "${KERNEL_BZIMAGE}",
+        "cpu": 4,
+        "cmdline": "root=/dev/sda3 i2c-stub.chip_addr=0x48,0x49",
+        "mem": 4096
+    },
+    "enable_syscalls": [
+        "openat${DOL_SIGN}hwmon_lm90_*",
+        "read${DOL_SIGN}hwmon_lm90_sysfs",
+        "write${DOL_SIGN}hwmon_lm90_*",
+        "openat${DOL_SIGN}i2c_hwmon_lm90",
+        "ioctl${DOL_SIGN}I2C_SLAVE_hwmon_lm90",
+        "ioctl${DOL_SIGN}I2C_RDWR_hwmon_lm90",
+        "openat${DOL_SIGN}i2c_hwmon_lm90_new",
+        "openat${DOL_SIGN}i2c_hwmon_lm90_delete",
+        "write${DOL_SIGN}i2c_hwmon_lm90_new",
+        "write${DOL_SIGN}i2c_hwmon_lm90_delete"
+    ],
+    "cover_filter": {
+        "files": [
+            "^drivers/hwmon/*"
+        ]
+    }
+}

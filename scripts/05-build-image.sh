@@ -105,6 +105,34 @@ sudo cp -rf "$SYZKALLER_DIR/bin/linux_amd64" "$IMAGE_MOUNT_DIR/bin/"
 # 7. Remove vfat mount to avoid conflicts on boot
 sudo sed -i '/vfat/d' "$IMAGE_MOUNT_DIR/etc/fstab"
 
+# ------------------------------------------------
+# drivers_hwmon_lm90
+# 8. Ensure I2C stub module is loaded and configure lm90 devices on boot
+grep -q "i2c-stub" "$IMAGE_MOUNT_DIR/etc/modules" \
+|| echo "i2c-stub" | sudo tee -a "$IMAGE_MOUNT_DIR/etc/modules"
+
+RC_LOCAL_DIR="$IMAGE_MOUNT_DIR/etc/rc.d"
+RC_LOCAL_SCRIPT="$RC_LOCAL_DIR/rc.local"
+SCRIPT_BLOCK='
+# drivers_hwmon_lm90
+I2C_NUM=$(ls /sys/bus/i2c/devices/ | grep -E "^i2c-[0-9]+" | head -1 | sed "s/i2c-//")
+echo "max6696 0x48" > /sys/bus/i2c/devices/i2c-${I2C_NUM}/new_device
+echo "adt7481 0x49" > /sys/bus/i2c/devices/i2c-${I2C_NUM}/new_device
+'
+
+sudo mkdir -p "$RC_LOCAL_DIR"
+if [ ! -f "$RC_LOCAL_SCRIPT" ]; then
+    echo '#!/bin/bash'     | sudo tee    "$RC_LOCAL_SCRIPT"
+    echo "${SCRIPT_BLOCK}" | sudo tee -a "$RC_LOCAL_SCRIPT"
+    sudo chmod +x "$RC_LOCAL_SCRIPT"
+else
+    if ! sudo grep -q '# drivers_hwmon_lm90' "$RC_LOCAL_SCRIPT"; then
+        echo "${SCRIPT_BLOCK}" | sudo tee -a "$RC_LOCAL_SCRIPT"
+    fi
+fi
+
+# ------------------------------------------------
+
 # END. Final adjustments and unmount
 echo "Unmounting main image partition..."
 echo "✅ Guest image is ready at: $IMAGE_PATH"

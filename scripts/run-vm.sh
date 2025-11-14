@@ -42,7 +42,7 @@ script -q -c "
     -cpu host \
     -netdev user,id=net0,hostfwd=tcp::${PORT}-:22 \
     -device virtio-net,netdev=net0 \
-    -append 'root=/dev/sda3 console=ttyS0' \
+    -append 'root=/dev/sda3 console=ttyS0 i2c-stub.chip_addr=0x48,0x49' \
     -nographic
 " "$DEBUG_VM_LOG_FILE"
 
