@@ -1,0 +1,52 @@
+{
+    "target": "linux/amd64",
+    "http": "0.0.0.0:${DEFAULT_SYZ_HTTP_INTERNAL_PORT}",
+    "workdir": "${SYZKALLER_WORKDIR}",
+    "kernel_obj": "${KERNEL_BUILD_DIR}",
+    "kernel_src": "${KERNEL_DIR}",
+    "image": "${IMAGE_PATH}",
+    "sshkey": "${SSH_KEY_PATH}",
+    "ssh_user": "root",
+    "syzkaller": "${SYZKALLER_DIR}",
+    "procs": 16,
+    "type": "qemu",
+    "sandbox": "none",
+    "cover": true,
+    "execprog_bin_on_target": "/bin/linux_amd64/syz-execprog",
+    "executor_bin_on_target": "/bin/linux_amd64/syz-executor",
+    "vm": {
+	"qemu": "${QEMU_BUILD_DIR}/usr/bin/qemu-system-x86_64",
+        "count": 4,
+        "qemu_args": "-enable-kvm",
+        "kernel": "${KERNEL_BZIMAGE}",
+        "cpu": 4,
+        "cmdline": "root=/dev/sda3",
+        "mem": 4096
+    },
+    "enable_syscalls": [
+        "socket",
+        "bind",
+        "connect",
+        "sendmsg",
+        "sendto",
+        "recvmsg",
+        "recvfrom",
+        "setsockopt",
+        "getsockopt",
+        "poll",
+        "select",
+        "sendmmsg",
+        "recvmmsg",
+        "syz_emit_ethernet",
+        "syz_extract_tcp_res",
+        "syz_genetlink_get_family_id",
+        "syz_init_net_socket"
+    ],
+    "cover_filter": {
+        "files": [
+            "^net/netfilter/*",
+            "^net/ipv4/netfilter/*",
+            "^net/ipv6/netfilter/*"
+        ]
+    }
+}
