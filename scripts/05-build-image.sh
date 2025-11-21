@@ -11,6 +11,8 @@ source "$(dirname "$0")/01-setup-env.sh"
 # List of packages to install (space-separated)
 PACKAGES_TO_INSTALL=""
 # PACKAGES_TO_INSTALL="gcc-c++ lcov nano bash-completion"
+# Target image size in GB
+TARGET_IMAGE_SIZE_GB=8
 # --------------------
 
 help() {
@@ -37,7 +39,9 @@ cleanup() {
     if mountpoint -q "$IMAGE_MOUNT_DIR/dev"; then
         sudo umount "$IMAGE_MOUNT_DIR/dev"
     fi
-    sudo umount "$IMAGE_MOUNT_DIR"
+    if mountpoint -q "$IMAGE_MOUNT_DIR"; then
+        sudo umount "$IMAGE_MOUNT_DIR"
+    fi
 }
 
 # Register cleanup function to run upon any exit (SUCCESS or FAILURE)
@@ -57,6 +61,54 @@ if [ ! -f "$IMAGE_PATH" ]; then
     PACKAGES_TO_INSTALL="gcc"
 else
     echo "Guest image $IMAGE_PATH already exists. Skipping download."
+fi
+
+# 1.1 Expand image to target size
+CURRENT_SIZE=$(stat -c%s "$IMAGE_PATH")
+TARGET_SIZE=$((TARGET_IMAGE_SIZE_GB * 1024 * 1024 * 1024))
+if [ "$CURRENT_SIZE" -lt "$TARGET_SIZE" ]; then
+    echo "Expanding image from $(($CURRENT_SIZE / 1024 / 1024 / 1024))GB to ${TARGET_IMAGE_SIZE_GB}GB..."
+    dd if=/dev/zero bs=1M count=$(((TARGET_SIZE - CURRENT_SIZE) / 1024 / 1024)) >> "$IMAGE_PATH"
+
+    # Get partition info
+    PART_START=$(sudo fdisk -l "$IMAGE_PATH" | grep img3 | awk '{print $2}')
+
+    # Resize GPT partition using sgdisk or parted
+    echo "Resizing partition img3..."
+    if command -v sgdisk &> /dev/null; then
+        # Using sgdisk (GPT)
+        sudo sgdisk -d 3 "$IMAGE_PATH"
+        sudo sgdisk -n 3:${PART_START}:0 -t 3:8300 "$IMAGE_PATH"
+    else
+        # Using parted as fallback
+        sudo parted "$IMAGE_PATH" resizepart 3 100%
+    fi
+
+    # Setup loop device and resize filesystem
+    LOOP_DEV=$(sudo losetup -f --show "$IMAGE_PATH")
+    sudo partprobe "$LOOP_DEV"
+    sleep 1
+
+    # Check if partition device exists
+    if [ ! -b "${LOOP_DEV}p3" ]; then
+        echo "Error: ${LOOP_DEV}p3 not found, trying kpartx..."
+        sudo kpartx -a "$LOOP_DEV"
+        PART_DEV="/dev/mapper/$(basename $LOOP_DEV)p3"
+    else
+        PART_DEV="${LOOP_DEV}p3"
+    fi
+
+    sudo e2fsck -f -y "$PART_DEV" || true
+    sudo resize2fs "$PART_DEV"
+
+    # Cleanup
+    if [ -b "/dev/mapper/$(basename $LOOP_DEV)p3" ]; then
+        sudo kpartx -d "$LOOP_DEV"
+    fi
+    sudo losetup -d "$LOOP_DEV"
+    echo "Image expanded successfully."
+else
+    echo "Image size is already ${TARGET_IMAGE_SIZE_GB}GB or larger. Skipping expansion."
 fi
 
 # 2. Mount the image partition
