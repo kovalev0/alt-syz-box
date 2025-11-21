@@ -109,6 +109,10 @@ RUN apt-get update		&& \
 # Optional user tools
 RUN apt-get update		&& \
     apt-get install -y	\
+	e2fsprogs			\
+	gdisk				\
+	kpartx				\
+	parted				\
 	bash-completion			\
 	procps				\
 	bc				\
