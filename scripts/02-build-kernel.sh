@@ -58,7 +58,8 @@ git config --global http.sslVerify false
 if [ ! -d "$KERNEL_DIR" ]; then
     mkdir -p "$KERNEL_DIR"
     echo "Cloning kernel from $KERNEL_GIT_URL (branch: $KERNEL_GIT_TAG)..."
-    git clone --depth=1 --branch="$KERNEL_GIT_TAG" "$KERNEL_GIT_URL" "$KERNEL_DIR"
+#    git clone --depth=1 --branch="$KERNEL_GIT_TAG" "$KERNEL_GIT_URL" "$KERNEL_DIR"
+    git clone --branch="$KERNEL_GIT_TAG" "$KERNEL_GIT_URL" "$KERNEL_DIR"
 
     if ls "$PATCH_DIR"/*.patch.applied 1> /dev/null 2>&1; then
         rename .applied "" "$PATCH_DIR"/*.patch.applied

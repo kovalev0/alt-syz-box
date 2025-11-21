@@ -9,8 +9,8 @@ source "$(dirname "$0")/01-setup-env.sh"
 
 # --- CONFIGURATION ---
 # List of packages to install (space-separated)
-PACKAGES_TO_INSTALL=""
-# PACKAGES_TO_INSTALL="gcc-c++ lcov nano bash_completion"
+# PACKAGES_TO_INSTALL=""
+PACKAGES_TO_INSTALL="gcc-c++ nano bash_completion"
 # Target image size in GB
 TARGET_IMAGE_SIZE_GB=8
 # --------------------
