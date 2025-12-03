@@ -12,7 +12,7 @@ source "$(dirname "$0")/01-setup-env.sh"
 PACKAGES_TO_INSTALL=""
 # PACKAGES_TO_INSTALL="gcc-c++ lcov nano bash-completion"
 # Target image size in GB
-TARGET_IMAGE_SIZE_GB=8
+TARGET_IMAGE_SIZE_GB=12
 # --------------------
 
 help() {
