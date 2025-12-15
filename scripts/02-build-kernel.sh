@@ -58,7 +58,7 @@ git config --global http.sslVerify false
 if [ ! -d "$KERNEL_DIR" ]; then
     mkdir -p "$KERNEL_DIR"
     echo "Cloning kernel from $KERNEL_GIT_URL (branch: $KERNEL_GIT_TAG)..."
-    git clone --depth=1 --branch="$KERNEL_GIT_TAG" "$KERNEL_GIT_URL" "$KERNEL_DIR"
+    git clone --branch="$KERNEL_GIT_TAG" "$KERNEL_GIT_URL" "$KERNEL_DIR"
 
     if ls "$PATCH_DIR"/*.patch.applied 1> /dev/null 2>&1; then
         rename .applied "" "$PATCH_DIR"/*.patch.applied
@@ -92,6 +92,18 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     --set-str LOCALVERSION -"$KERNEL_LOCALVERSION" \
     -d LOCALVERSION_AUTO
+
+#----------------------------------------------------
+# Apply ALT config
+# https://packages.altlinux.org/ru/c10f2/srpms/kernel-image-6.12/
+# curl -s https://git.altlinux.org/tasks/archive/done/_391/400922/build/100/x86_64/rpms/kernel-image-6.12-6.12.59-alt0.c10f.2.x86_64.rpm | rpm2cpio | cpio -imdv "./boot/config-6.12.59-6.12-alt0.c10f.2"
+cat "$CONTAINER_REPO_DIR/config/kernel/config-6.12.59-6.12-alt0.c10f.2" >> "$KERNEL_BUILD_DIR/.config"
+
+# Sets the necessary baseline configuration options (including those required to
+# boot without an initrd) before the final configuration or manual overrides are applied.
+cat "$KERNEL_DIR"/arch/x86/configs/x86_64_defconfig >> "$KERNEL_BUILD_DIR/.config"
+
+#----------------------------------------------------
 
 # Apply detailed LVC syzkaller-specific kernel config options
 # Reference: https://portal.linuxtesting.ru/LVCFuzzingKernelOptions.html
@@ -154,7 +166,8 @@ if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
         -e GCOV_KERNEL -e GCOV_PROFILE_ALL
 else
     # All built-in (other default fuzz version)
-    sed -i "s|=m|=y|" "$KERNEL_BUILD_DIR/.config"
+    # sed -i "s|=m|=y|" "$KERNEL_BUILD_DIR/.config"
+    echo "Skip \"All built-in\", use ALT release config"
 fi
 
 make ARCH=x86_64 O="$KERNEL_BUILD_DIR" olddefconfig
