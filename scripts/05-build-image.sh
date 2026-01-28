@@ -53,8 +53,8 @@ if [ ! -f "$IMAGE_PATH" ]; then
     echo "Downloading guest image..."
     wget --no-check-certificate --progress=dot:mega "$IMAGE_BASE_URL/$IMAGE_FILENAME.xz"
     unxz "./$IMAGE_FILENAME.xz"
-    # Needed for C repro generation
-    PACKAGES_TO_INSTALL="gcc"
+
+    PACKAGES_TO_INSTALL="gcc gcc-c++ lcov nano bash-completion git"
 else
     echo "Guest image $IMAGE_PATH already exists. Skipping download."
 fi
@@ -102,7 +102,8 @@ else
 fi
 
 # 6. Copy syzkaller/bin/linux_amd64 to image
-sudo cp -rf "$SYZKALLER_DIR/bin/linux_amd64" "$IMAGE_MOUNT_DIR/bin/"
+# SKIP
+# sudo cp -rf "$SYZKALLER_DIR/bin/linux_amd64" "$IMAGE_MOUNT_DIR/bin/"
 
 # 7. Remove vfat mount to avoid conflicts on boot
 sudo sed -i '/vfat/d' "$IMAGE_MOUNT_DIR/etc/fstab"

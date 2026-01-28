@@ -28,6 +28,30 @@ while getopts "hp:" opt; do
     esac
 done
 
+HOST_KERNEL_DIR="$KERNEL_DIR"
+HOST_KERNEL_BUILD_DIR="$KERNEL_BUILD_DIR"
+
+VM_KERNEL_DIR_TAG="kernel_dir"
+VM_KERNEL_DIR="$HOST_KERNEL_DIR"
+
+echo "------------------------------------------"
+echo "  host kernel directory is: $HOST_KERNEL_DIR"
+echo "  9P mount tag is:          $VM_KERNEL_DIR_TAG"
+echo "---- run this commands to collect kernel coverage:"
+echo "  mkdir -p ${VM_KERNEL_DIR}"
+echo "  mount -t 9p -o trans=virtio,version=9p2000.L kernel_dir ${VM_KERNEL_DIR}"
+echo "  git clone https://github.com/kovalev0/usb-gadget-tests.git && cd ./usb-gadget-tests"
+echo "----"
+echo "  TEST_NAME=\"\"   , example: TEST_NAME=\"sisusbvga-FULL_SPEED\""
+echo "  echo \${TEST_NAME} > tests/list.txt && make \${TEST_NAME} && ./check.sh"
+echo "  SRC_PATH=\"\"    , example: SRC_PATH=\"drivers/usb/misc/sisusbvga/\""
+echo "  LCOV_FILTER=\"\" , example: LCOV_FILTER=\"*sisusbvga*\" "
+echo "  lcov -c -d /sys/kernel/debug/gcov/${HOST_KERNEL_BUILD_DIR}/\${SRC_PATH} -o coverage.info"
+echo "  lcov --extract coverage.info \${LCOV_FILTER} -o coverage.\${TEST_NAME}"
+echo "  genhtml coverage.\${TEST_NAME} --output-directory report_coverage.\${TEST_NAME}"
+echo "  tar -czf report_coverage.\${TEST_NAME}.tar.gz report_coverage.\${TEST_NAME} --remove-files"
+echo "------------------------------------------"
+
 echo "▶ Connecting to VM via SSH on port $PORT..."
 ssh -i "$SSH_KEY_PATH" \
     -p "$PORT" \

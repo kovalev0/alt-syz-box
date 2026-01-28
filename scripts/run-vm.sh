@@ -32,6 +32,9 @@ echo "➡️ SSH will be available on host port: $PORT"
 
 rm -f "$DEBUG_VM_LOG_FILE"
 
+HOST_KERNEL_DIR="$KERNEL_DIR"
+VM_KERNEL_DIR_TAG="kernel_dir"
+
 script -q -c "
 \"$QEMU_BUILD_DIR\"/usr/bin/qemu-system-x86_64 \
     -hda \"$IMAGE_PATH\" \
@@ -42,7 +45,9 @@ script -q -c "
     -cpu host \
     -netdev user,id=net0,hostfwd=tcp::${PORT}-:22 \
     -device virtio-net,netdev=net0 \
-    -append 'root=/dev/sda3 console=ttyS0' \
+    -fsdev local,security_model=none,id=fs0,path=\"$HOST_KERNEL_DIR\" \
+    -device virtio-9p-pci,fsdev=fs0,mount_tag=\"$VM_KERNEL_DIR_TAG\" \
+    -append 'root=/dev/sda3 console=ttyS0 dummy_hcd.dyndbg=+pmf raw_gadget.dyndbg=+pmf' \
     -nographic
 " "$DEBUG_VM_LOG_FILE"
 

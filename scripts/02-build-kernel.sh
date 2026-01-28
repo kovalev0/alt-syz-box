@@ -148,6 +148,51 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e 9P_FS -e 9P_FS_POSIX_ACL \
     -e NET_9P -e NET_9P_VIRTIO
 
+# ---------------------------------------------------
+# devel-gcov-usb_gadget_tests
+# https://github.com/kovalev0/usb-gadget-tests.git
+
+# raw-gadget support
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e USB_GADGET \
+    -e USB_RAW_GADGET \
+    -e USB_DUMMY_HCD
+
+# Enable dyndbg
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e DYNAMIC_DEBUG
+
+# Ethernet drivers
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e USB_NET_DRIVERS		\
+    -m USB_RTL8150
+
+# Serial drivers
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e USB_SERIAL		\
+    -m USB_SERIAL_CH341		\
+    -m USB_SERIAL_FTDI_SIO	\
+    -m USB_SERIAL_CP210X	\
+    -m USB_SERIAL_PL2303	\
+    -m USB_SERIAL_OTI6858
+
+# Input tablets
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e INPUT_TABLET		\
+    -m TABLET_USB_HANWANG	\
+    -m TABLET_USB_PEGASUS	\
+    -m TABLET_USB_ACECAD	\
+    -m TABLET_USB_KBTAB		\
+    -m TABLET_USB_AIPTEK
+
+# Others usb drivers
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e USB_STORAGE		\
+    -e USB_TMC			\
+    -e USB_PRINTER
+
+# ---------------------------------------------------
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
