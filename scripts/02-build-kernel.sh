@@ -185,6 +185,10 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -m TABLET_USB_KBTAB		\
     -m TABLET_USB_AIPTEK
 
+# misc usb drivers
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -m USB_SISUSBVGA
+
 # Others usb drivers
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     -e USB_STORAGE		\
