@@ -93,6 +93,7 @@ if [ -n "$PACKAGES_TO_INSTALL" ]; then
     # Fix DNS resolution inside chroot
     sudo rm -f "$IMAGE_MOUNT_DIR/etc/resolv.conf"
     sudo cp /etc/resolv.conf "$IMAGE_MOUNT_DIR/etc/resolv.conf"
+
     # Execute installation inside chroot
     sudo chroot "$IMAGE_MOUNT_DIR" /bin/bash -c "apt-get update && apt-get install -y $PACKAGES_TO_INSTALL && apt-get clean"
 

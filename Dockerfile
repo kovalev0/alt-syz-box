@@ -115,6 +115,8 @@ RUN apt-get update		&& \
 	curl				\
 	vim-common			\
 	nano				\
+	gdb				\
+	python3-module-Pygments		\
     && \
     apt-get clean
 
@@ -126,6 +128,18 @@ RUN groupadd -g ${GID} ${USERNAME}				&& \
 
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
+
+# Download dashboard core and create config directory
+# Create initialization script with custom layout and settings
+RUN wget -q -P ~/ https://github.com/cyrus-and/gdb-dashboard/raw/master/.gdbinit && \
+    mkdir -p ~/.gdbinit.d && \
+    cat > ~/.gdbinit.d/init <<-'EOF'
+dashboard -layout source stack !threads expressions variables !registers !assembly
+dashboard stack -style limit 3
+dashboard source -style height 30
+
+target remote :1234
+EOF
 
 # Copy all project files into the container
 COPY --chown=${USERNAME}:${USERNAME} . /home/user/alt-syz-box

@@ -196,7 +196,9 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
-        -e GCOV_KERNEL -e GCOV_PROFILE_ALL
+        -e GCOV_KERNEL
+#        -e GCOV_KERNEL -e GCOV_PROFILE_ALL
+# Add "GCOV_PROFILE := y" to target Makefile
 else
     # All built-in (other default fuzz version)
     sed -i "s|=m|=y|" "$KERNEL_BUILD_DIR/.config"

@@ -35,6 +35,8 @@ rm -f "$DEBUG_VM_LOG_FILE"
 HOST_KERNEL_DIR="$KERNEL_DIR"
 VM_KERNEL_DIR_TAG="kernel_dir"
 
+#    -s -S \
+
 script -q -c "
 \"$QEMU_BUILD_DIR\"/usr/bin/qemu-system-x86_64 \
     -hda \"$IMAGE_PATH\" \
