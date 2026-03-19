@@ -80,11 +80,16 @@ export QEMU_GIT_TAG="v9.1.2"
 # ------------------------
 
 # Syzkaller repository. Default is upstream version
-export SYZKALLER_GIT_URL="https://github.com/google/syzkaller.git"
-export SYZKALLER_GIT_TAG="master"
+# export SYZKALLER_GIT_URL="https://github.com/google/syzkaller.git"
+# export SYZKALLER_GIT_TAG="master"
 # To use the LVC fork version, uncomment these lines:
 # export SYZKALLER_GIT_URL="https://git.linuxtesting.ru/pub/scm/tools/lvc/syzkaller.git"
 # export SYZKALLER_GIT_TAG="lvc"
+# Use Syzkaller fork compatible with Go < 1.26 (required for ALT Linux p11).
+# This branch points to a state before the upstream migration to
+# go1.26 (commit a3d21242b).
+export SYZKALLER_GIT_URL="https://github.com/kovalev0/syzkaller.git"
+export SYZKALLER_GIT_TAG="compat-go1.25"
 
 # ------------------------
 
