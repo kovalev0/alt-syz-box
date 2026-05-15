@@ -115,6 +115,7 @@ RUN apt-get update		&& \
 	curl				\
 	vim-common			\
 	nano				\
+	perl-JSON-PP			\
     && \
     apt-get clean
 
