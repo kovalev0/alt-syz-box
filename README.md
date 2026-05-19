@@ -8,7 +8,7 @@ This repository provides a CLI-driven, Docker-based workflow to build, configure
 -   **Centralized Configuration**: Key settings like names and ports are in `project.env`.
 -   **Modular Execution**: A powerful `run-all.sh` script to control each stage of the process.
 -   **Flexible Scripting**: Most scripts accept arguments to override defaults.
--   **Comprehensive Tooling**: Includes helpers for VM management, monitoring, and file transfer.
+-   **Comprehensive Tooling**: Includes helpers for VM management, monitoring, and artifact collection.
 
 ---
 
@@ -17,6 +17,7 @@ This repository provides a CLI-driven, Docker-based workflow to build, configure
 ```
 alt-syz-box/
 ├── build-docker-image.sh
+├── collect-artifacts.sh
 ├── config/
 │   └── syzkaller/
 │       ├── generic.config.template
@@ -157,6 +158,60 @@ docker exec -it alt-syz-box-container ./scripts/run-vm.sh -p 2222
 # Copy a directory FROM the VM
 ~/alt-syz-box/scripts/scp-from-vm.sh -p 2222 /root/crashes ./
 ```
+
+## 5. Artifact Collection
+
+### `collect-artifacts.sh` — full collection (run on host)
+
+Runs the collection pipeline inside the container via `docker exec`. The resulting
+archive is placed in the container's syzkaller workdir, which is mounted to
+`./volume/workdir-<config>/` on the host and accessible immediately after the script
+finishes.
+
+```bash
+# Collect crashes, corpus, configs, coverage and log
+./collect-artifacts.sh
+
+# Also include vmlinux and rawcover (needed for addr2line post-processing)
+./collect-artifacts.sh --with-rawcover
+
+# Trim repeated log/report/machineInfo files to 3 most recent per crash dir
+./collect-artifacts.sh --trim-crashes
+
+# Combine both
+./collect-artifacts.sh --with-rawcover --trim-crashes
+```
+
+The archive `artifacts_<TIMESTAMP>.tar.xz` contains:
+
+```
+artifacts_<TIMESTAMP>/
+  crashes/                   syz-manager crash directories
+  corpus.db                  corpus database
+  fuzzing.log                syz-manager log (/tmp/alt-syz-box.log)
+  configs/
+    config.json              desired syzkaller config (template-generated)
+    linux-<HASH>             kernel .config (hash = kernel git HEAD)
+    syzkaller-<HASH>         actual running syzkaller config (hash = syzkaller git HEAD)
+  coverage/
+    index.html               browsable HTML coverage report
+  vmlinux                    kernel debug binary      (only with --with-rawcover)
+  rawcover                   raw PC coverage          (only with --with-rawcover)
+```
+
+### `scripts/tools/collect-coverage.sh` — coverage only (inside container)
+
+Fetches the HTML coverage page from syz-manager and saves it to a local directory.
+
+```bash
+# Default output: $SYZKALLER_WORKDIR/coverage_<TIMESTAMP>/
+./scripts/tools/collect-coverage.sh
+
+# Custom output directory
+./scripts/tools/collect-coverage.sh -o /tmp/my-coverage
+```
+
+---
 
 ## License
 This project is licensed under the GNU General Public License v3.0. See the LICENSE file for details.
