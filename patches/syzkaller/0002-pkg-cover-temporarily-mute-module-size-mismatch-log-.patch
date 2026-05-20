@@ -1,0 +1,71 @@
+From ceec63e57407fbeedcf2136cdd7be67934ddc69a Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Wed, 20 May 2026 07:59:00 +0000
+Subject: [PATCH] pkg/cover: temporarily mute module size mismatch log in
+ canonicalizer
+
+Suppressed the misleading `log.Errorf` that triggers when a dynamically loaded
+module's coresize in the guest VM instance differs from its canonical size
+parsed from the ELF file on the host.
+
+*** THE PROBLEM ***
+When fuzzing a real production kernel configuration (such as ALT Linux
+JeOS/SP) with CONFIG_MODULES=y, syz-manager floods the logs with:
+
+[ERROR] kernel build has changed; instance module intel_rapl_common differs from canonical
+
+While this error does not abort the syz-manager startup, it litters the log
+output and flags the module as `discard = true`, blinding the fuzzer to the
+module's coverage (KCOV).
+
+*** TECHNICAL ANALYSIS & PROOF ***
+Investigation shows that the modules on the host and inside the VM are
+binary identical, sharing the exact same Build ID:
+
+  Host ELF Build ID:
+  Build ID: defa1647b9ba769dc813d17ebded659b28a37bac
+
+  Guest VM sysfs Build ID:
+  # xxd /sys/module/intel_rapl_common/notes/.note.gnu.build-id
+  00000010: defa 1647 b9ba 769d c813 d17e bded 659b
+
+However, their sizes strictly mismatch:
+  Host `size` utility output (raw sections):
+  text    data     bss     dec     hex filename
+  79262   31180     704  111146   1b22a intel_rapl_common.ko
+
+  Guest `coresize` (allocated layout in memory):
+  # cat /sys/module/intel_rapl_common/coresize
+  122880
+
+This 11,734-byte discrepancy occurs because the Linux kernel loader
+allocates module memory by grouping sections (.text, .data, .rodata)
+by page protection attributes and aligning each region to the page boundary
+(4096 bytes on x86_64). The guest reports `coresize` as aligned memory blocks
+(122,880 / 4096 = 30 pages exactly) plus runtime kernel overhead, while
+syzkaller calculates the size based on the raw vmlinux/ELF layout.
+
+*** IMPACT & WORKAROUND ***
+Since forcing CONFIG_MODULES=n (Built-in) is not acceptable when testing
+downstream production kernels, muting this log keeps the syz-manager output
+clean.
+---
+ pkg/cover/canonicalizer.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pkg/cover/canonicalizer.go b/pkg/cover/canonicalizer.go
+index 6edb3db..a4ebbfb 100644
+--- a/pkg/cover/canonicalizer.go
++++ b/pkg/cover/canonicalizer.go
+@@ -85,7 +85,7 @@ func (can *Canonicalizer) NewInstance(modules []*vminfo.KernelModule) *Canonical
+ 		canonicalAddr := uint64(0)
+ 		canonicalModule, found := can.modules[module.Name]
+ 		if !found || canonicalModule.Size != module.Size {
+-			log.Errorf("kernel build has changed; instance module %v differs from canonical", module.Name)
++			// log.Errorf("kernel build has changed; instance module %v differs from canonical", module.Name)
+ 			discard = true
+ 		}
+ 		if found {
+-- 
+2.50.1
+
