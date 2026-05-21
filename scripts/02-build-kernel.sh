@@ -148,6 +148,16 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e 9P_FS -e 9P_FS_POSIX_ACL \
     -e NET_9P -e NET_9P_VIRTIO
 
+# ---------------------------------------------------
+# drivers_gpio
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e CONFIGFS_FS -e GPIOLIB \
+    -e GPIO_CDEV -e GPIO_CDEV_V1 \
+    -e GPIO_SIM \
+    -e GPIO_AGGREGATOR
+
+# ---------------------------------------------------
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \

@@ -107,6 +107,89 @@ sudo cp -rf "$SYZKALLER_DIR/bin/linux_amd64" "$IMAGE_MOUNT_DIR/bin/"
 # 7. Remove vfat mount to avoid conflicts on boot
 sudo sed -i '/vfat/d' "$IMAGE_MOUNT_DIR/etc/fstab"
 
+# ------------------------------------------------
+# drivers_gpio
+# 8. Create gpio-sim boot setup script and invoke it from rc.local
+#
+# Creates two configfs devices in the guest on every boot:
+#   syz  - live, 8 named lines (syz-line-0..7), exposes /dev/gpiochip0
+#   syz0 - non-live (bank0/line0..3/hog + bank1) for fuzzer
+#          machine-check: paths in syz descriptions must exist at start
+
+sudo tee "$IMAGE_MOUNT_DIR/usr/local/bin/setup-gpio-sim.sh" > /dev/null << 'END_OF_SETUP_SCRIPT'
+#!/bin/bash
+set -u
+
+mountpoint -q /sys/kernel/config 2>/dev/null || mount -t configfs none /sys/kernel/config
+
+modprobe gpio-sim        2>/dev/null || true
+modprobe gpio-aggregator 2>/dev/null || true
+
+for i in $(seq 1 50); do
+    [ -d /sys/kernel/config/gpio-sim ] && break
+    sleep 0.1
+done
+
+ROOT=/sys/kernel/config/gpio-sim
+
+# Tear down any leftover from previous boot
+for DEV in syz syz0 syz1 syz2 syz3; do
+    [ -d $ROOT/$DEV ] || continue
+    echo 0 > $ROOT/$DEV/live 2>/dev/null || true
+    rmdir $ROOT/$DEV/*/line*/hog 2>/dev/null || true
+    rmdir $ROOT/$DEV/*/line*     2>/dev/null || true
+    rmdir $ROOT/$DEV/*           2>/dev/null || true
+    rmdir $ROOT/$DEV             2>/dev/null || true
+done
+
+# LIVE device "syz" : provides /dev/gpiochip0
+mkdir -p $ROOT/syz/bank0
+echo 8         > $ROOT/syz/bank0/num_lines
+echo syz-bank0 > $ROOT/syz/bank0/label
+for i in 0 1 2 3 4 5 6 7; do
+    mkdir -p $ROOT/syz/bank0/line$i
+    echo "syz-line-$i" > $ROOT/syz/bank0/line$i/name
+done
+echo 1 > $ROOT/syz/live
+chmod 666 /dev/gpiochip0 2>/dev/null || true
+
+# NOT LIVE gpio-sim device "syz0" : satisfies machine-check probes
+mkdir -p $ROOT/syz0/bank0
+echo 4              > $ROOT/syz0/bank0/num_lines
+echo scaffold-bank0 > $ROOT/syz0/bank0/label
+for i in 0 1 2 3; do
+    mkdir -p $ROOT/syz0/bank0/line$i/hog
+    echo "scaffold-line-$i" > $ROOT/syz0/bank0/line$i/name
+    echo "hog-$i"           > $ROOT/syz0/bank0/line$i/hog/name
+    echo input              > $ROOT/syz0/bank0/line$i/hog/direction
+done
+mkdir -p $ROOT/syz0/bank1
+echo 4 > $ROOT/syz0/bank1/num_lines
+exit 0
+END_OF_SETUP_SCRIPT
+
+sudo chmod +x "$IMAGE_MOUNT_DIR/usr/local/bin/setup-gpio-sim.sh"
+
+RC_LOCAL_DIR="$IMAGE_MOUNT_DIR/etc/rc.d"
+RC_LOCAL_SCRIPT="$RC_LOCAL_DIR/rc.local"
+SCRIPT_BLOCK='
+# drivers_gpio
+/usr/local/bin/setup-gpio-sim.sh
+'
+
+sudo mkdir -p "$RC_LOCAL_DIR"
+if [ ! -f "$RC_LOCAL_SCRIPT" ]; then
+    echo '#!/bin/bash'     | sudo tee    "$RC_LOCAL_SCRIPT"
+    echo "${SCRIPT_BLOCK}" | sudo tee -a "$RC_LOCAL_SCRIPT"
+    sudo chmod +x "$RC_LOCAL_SCRIPT"
+else
+    if ! sudo grep -q '# drivers_gpio' "$RC_LOCAL_SCRIPT"; then
+        echo "${SCRIPT_BLOCK}" | sudo tee -a "$RC_LOCAL_SCRIPT"
+    fi
+fi
+
+# ------------------------------------------------
+
 # END. Final adjustments and unmount
 echo "Unmounting main image partition..."
 echo "✅ Guest image is ready at: $IMAGE_PATH"

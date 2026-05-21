@@ -1,0 +1,349 @@
+From 7fd856f5a143ac07cbc893b69d9ce65c9969b75b Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Thu, 21 May 2026 11:47:14 +0000
+Subject: [PATCH] sys/linux: add gpio* descriptions
+
+---
+ sys/linux/dev_gpio.txt       | 270 +++++++++++++++++++++++++++++++++++
+ sys/linux/dev_gpio.txt.const |  52 +++++++
+ 2 files changed, 322 insertions(+)
+ create mode 100644 sys/linux/dev_gpio.txt
+ create mode 100644 sys/linux/dev_gpio.txt.const
+
+diff --git a/sys/linux/dev_gpio.txt b/sys/linux/dev_gpio.txt
+new file mode 100644
+index 0000000..71a18dd
+--- /dev/null
++++ b/sys/linux/dev_gpio.txt
+@@ -0,0 +1,270 @@
++include <uapi/linux/gpio.h>
++include <uapi/linux/fcntl.h>
++
++# ==================== RESOURCES ====================
++
++resource fd_gpiochip[fd]
++resource fd_gpio_linereq[fd]
++resource fd_gpio_linehandle[fd]
++resource fd_gpio_lineevent[fd]
++resource fd_gpio_sysfs[fd]
++
++# ==================== /dev/gpiochipN ====================
++
++gpiochip_devices = "/dev/gpiochip0", "/dev/gpiochip1", "/dev/gpiochip2", "/dev/gpiochip3"
++
++openat$gpiochip(fd const[AT_FDCWD], file ptr[in, string[gpiochip_devices]], flags flags[open_flags], mode const[0]) fd_gpiochip
++read$gpiochip(fd fd_gpiochip, buf ptr[out, array[int8]], count len[buf])
++
++# ==================== CHARDEV IOCTLs (v2) ====================
++
++ioctl$GPIO_GET_CHIPINFO_IOCTL(fd fd_gpiochip, cmd const[GPIO_GET_CHIPINFO_IOCTL], arg ptr[out, gpiochip_info])
++ioctl$GPIO_V2_GET_LINEINFO_IOCTL(fd fd_gpiochip, cmd const[GPIO_V2_GET_LINEINFO_IOCTL], arg ptr[inout, gpio_v2_line_info])
++ioctl$GPIO_V2_GET_LINEINFO_WATCH_IOCTL(fd fd_gpiochip, cmd const[GPIO_V2_GET_LINEINFO_WATCH_IOCTL], arg ptr[inout, gpio_v2_line_info])
++ioctl$GPIO_GET_LINEINFO_UNWATCH_IOCTL(fd fd_gpiochip, cmd const[GPIO_GET_LINEINFO_UNWATCH_IOCTL], arg ptr[inout, int32[0:63]])
++ioctl$GPIO_V2_GET_LINE_IOCTL(fd fd_gpiochip, cmd const[GPIO_V2_GET_LINE_IOCTL], arg ptr[inout, gpio_v2_line_request])
++
++# ==================== CHARDEV IOCTLs (v1) ====================
++
++ioctl$GPIO_GET_LINEHANDLE_IOCTL(fd fd_gpiochip, cmd const[GPIO_GET_LINEHANDLE_IOCTL], arg ptr[inout, gpiohandle_request])
++ioctl$GPIO_GET_LINEEVENT_IOCTL(fd fd_gpiochip, cmd const[GPIO_GET_LINEEVENT_IOCTL], arg ptr[inout, gpioevent_request])
++ioctl$GPIO_GET_LINEINFO_IOCTL(fd fd_gpiochip, cmd const[GPIO_GET_LINEINFO_IOCTL], arg ptr[inout, gpioline_info])
++ioctl$GPIO_GET_LINEINFO_WATCH_IOCTL(fd fd_gpiochip, cmd const[GPIO_GET_LINEINFO_WATCH_IOCTL], arg ptr[inout, gpioline_info])
++
++# ==================== LINEREQ FD (v2 sub-fd) ====================
++
++ioctl$GPIO_V2_LINE_GET_VALUES_IOCTL(fd fd_gpio_linereq, cmd const[GPIO_V2_LINE_GET_VALUES_IOCTL], arg ptr[inout, gpio_v2_line_values])
++ioctl$GPIO_V2_LINE_SET_VALUES_IOCTL(fd fd_gpio_linereq, cmd const[GPIO_V2_LINE_SET_VALUES_IOCTL], arg ptr[in, gpio_v2_line_values])
++ioctl$GPIO_V2_LINE_SET_CONFIG_IOCTL(fd fd_gpio_linereq, cmd const[GPIO_V2_LINE_SET_CONFIG_IOCTL], arg ptr[in, gpio_v2_line_config])
++read$gpio_linereq(fd fd_gpio_linereq, buf ptr[out, array[int8]], count len[buf])
++
++# ==================== LINEHANDLE FD (v1 sub-fd) ====================
++
++ioctl$GPIOHANDLE_GET_LINE_VALUES_IOCTL(fd fd_gpio_linehandle, cmd const[GPIOHANDLE_GET_LINE_VALUES_IOCTL], arg ptr[out, gpiohandle_data])
++ioctl$GPIOHANDLE_SET_LINE_VALUES_IOCTL(fd fd_gpio_linehandle, cmd const[GPIOHANDLE_SET_LINE_VALUES_IOCTL], arg ptr[in, gpiohandle_data])
++ioctl$GPIOHANDLE_SET_CONFIG_IOCTL(fd fd_gpio_linehandle, cmd const[GPIOHANDLE_SET_CONFIG_IOCTL], arg ptr[in, gpiohandle_config])
++
++# ==================== LINEEVENT FD (v1 sub-fd) ====================
++
++ioctl$GPIOHANDLE_GET_LINE_VALUES_IOCTL_event(fd fd_gpio_lineevent, cmd const[GPIOHANDLE_GET_LINE_VALUES_IOCTL], arg ptr[out, gpiohandle_data])
++read$gpio_lineevent(fd fd_gpio_lineevent, buf ptr[out, array[int8]], count len[buf])
++
++# ==================== STRUCTURES (v2) ====================
++
++gpiochip_info {
++	name		array[int8, 32]
++	label		array[int8, 32]
++	lines		int32
++}
++
++gpio_v2_line_info {
++	name		array[int8, 32]
++	consumer	array[int8, 32]
++	offset		int32[0:63]
++	num_attrs	int32[0:10]
++	flags		flags[gpio_v2_line_flag, int64]
++	attrs		array[gpio_v2_line_attribute, 10]
++	padding		array[int32, 4]
++}
++
++gpio_v2_line_request {
++	offsets			array[int32[0:63], 64]
++	consumer		array[int8, 32]
++	config			gpio_v2_line_config
++	num_lines		int32[1:64]
++	event_buffer_size	int32
++	padding			array[int32, 5]
++	fd			fd_gpio_linereq	(out_overlay)
++}
++
++gpio_v2_line_config {
++	flags		flags[gpio_v2_line_flag, int64]
++	num_attrs	int32[0:10]
++	padding		array[int32, 5]
++	attrs		array[gpio_v2_line_config_attribute, 10]
++}
++
++gpio_v2_line_config_attribute {
++	attr		gpio_v2_line_attribute
++	mask		int64
++}
++
++gpio_v2_line_attribute {
++	id		flags[gpio_v2_line_attr_id, int32]
++	padding		const[0, int32]
++	payload		int64
++}
++
++gpio_v2_line_values {
++	bits		int64
++	mask		int64
++}
++
++# ==================== STRUCTURES (v1) ====================
++
++gpioline_info {
++	line_offset	int32[0:63]
++	flags		int32
++	name		array[int8, 32]
++	consumer	array[int8, 32]
++}
++
++gpiohandle_request {
++	lineoffsets	array[int32[0:63], 64]
++	flags		flags[gpiohandle_request_flags, int32]
++	default_values	array[int8, 64]
++	consumer_label	array[int8, 32]
++	lines		int32[1:64]
++	fd		fd_gpio_linehandle	(out_overlay)
++}
++
++gpioevent_request {
++	lineoffset	int32[0:63]
++	handleflags	flags[gpiohandle_request_flags, int32]
++	eventflags	flags[gpioevent_request_flags, int32]
++	consumer_label	array[int8, 32]
++	fd		fd_gpio_lineevent	(out_overlay)
++}
++
++gpiohandle_data {
++	values		array[int8, 64]
++}
++
++gpiohandle_config {
++	flags		flags[gpiohandle_request_flags, int32]
++	default_values	array[int8, 64]
++	padding		array[int32, 4]
++}
++
++# ==================== FLAGS ====================
++
++gpio_v2_line_flag = GPIO_V2_LINE_FLAG_USED, GPIO_V2_LINE_FLAG_ACTIVE_LOW, GPIO_V2_LINE_FLAG_INPUT, GPIO_V2_LINE_FLAG_OUTPUT, GPIO_V2_LINE_FLAG_EDGE_RISING, GPIO_V2_LINE_FLAG_EDGE_FALLING, GPIO_V2_LINE_FLAG_OPEN_DRAIN, GPIO_V2_LINE_FLAG_OPEN_SOURCE, GPIO_V2_LINE_FLAG_BIAS_PULL_UP, GPIO_V2_LINE_FLAG_BIAS_PULL_DOWN, GPIO_V2_LINE_FLAG_BIAS_DISABLED, GPIO_V2_LINE_FLAG_EVENT_CLOCK_REALTIME, GPIO_V2_LINE_FLAG_EVENT_CLOCK_HTE
++
++gpio_v2_line_attr_id = GPIO_V2_LINE_ATTR_ID_FLAGS, GPIO_V2_LINE_ATTR_ID_OUTPUT_VALUES, GPIO_V2_LINE_ATTR_ID_DEBOUNCE
++
++gpiohandle_request_flags = GPIOHANDLE_REQUEST_INPUT, GPIOHANDLE_REQUEST_OUTPUT, GPIOHANDLE_REQUEST_ACTIVE_LOW, GPIOHANDLE_REQUEST_OPEN_DRAIN, GPIOHANDLE_REQUEST_OPEN_SOURCE, GPIOHANDLE_REQUEST_BIAS_PULL_UP, GPIOHANDLE_REQUEST_BIAS_PULL_DOWN, GPIOHANDLE_REQUEST_BIAS_DISABLE
++
++gpioevent_request_flags = GPIOEVENT_REQUEST_RISING_EDGE, GPIOEVENT_REQUEST_FALLING_EDGE, GPIOEVENT_REQUEST_BOTH_EDGES
++
++# ==================== GPIO-SIM CONFIGFS LIFECYCLE ====================
++# Boot setup creates "syz" (live, 8 lines, /dev/gpiochip0) and "syz0".
++
++gpio_sim_dev_paths = "/sys/kernel/config/gpio-sim/syz1", "/sys/kernel/config/gpio-sim/syz2", "/sys/kernel/config/gpio-sim/syz3"
++
++mkdirat$gpio_sim_dev(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_dev_paths]], mode const[0x1ff])
++rmdir$gpio_sim_dev(path ptr[in, string[gpio_sim_dev_paths]])
++
++gpio_sim_bank_paths = "/sys/kernel/config/gpio-sim/syz0/bank2", "/sys/kernel/config/gpio-sim/syz0/bank3", "/sys/kernel/config/gpio-sim/syz/bank1", "/sys/kernel/config/gpio-sim/syz1/bank0", "/sys/kernel/config/gpio-sim/syz2/bank0"
++
++mkdirat$gpio_sim_bank(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_bank_paths]], mode const[0x1ff])
++rmdir$gpio_sim_bank(path ptr[in, string[gpio_sim_bank_paths]])
++
++gpio_sim_line_paths = "/sys/kernel/config/gpio-sim/syz0/bank1/line0", "/sys/kernel/config/gpio-sim/syz0/bank1/line1", "/sys/kernel/config/gpio-sim/syz0/bank1/line2", "/sys/kernel/config/gpio-sim/syz0/bank1/line3", "/sys/kernel/config/gpio-sim/syz/bank0/line0", "/sys/kernel/config/gpio-sim/syz/bank0/line7"
++
++mkdirat$gpio_sim_line(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_line_paths]], mode const[0x1ff])
++rmdir$gpio_sim_line(path ptr[in, string[gpio_sim_line_paths]])
++
++gpio_sim_hog_paths = "/sys/kernel/config/gpio-sim/syz0/bank0/line0/hog", "/sys/kernel/config/gpio-sim/syz0/bank0/line1/hog", "/sys/kernel/config/gpio-sim/syz0/bank0/line2/hog", "/sys/kernel/config/gpio-sim/syz0/bank0/line3/hog", "/sys/kernel/config/gpio-sim/syz/bank0/line0/hog"
++
++mkdirat$gpio_sim_hog(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_hog_paths]], mode const[0x1ff])
++rmdir$gpio_sim_hog(path ptr[in, string[gpio_sim_hog_paths]])
++
++# ==================== GPIO-SIM CONFIGFS ATTRIBUTES ====================
++
++gpio_sim_live_paths = "/sys/kernel/config/gpio-sim/syz0/live", "/sys/kernel/config/gpio-sim/syz/live", "/sys/kernel/config/gpio-sim/syz1/live", "/sys/kernel/config/gpio-sim/syz2/live"
++
++openat$gpio_sim_live(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_live_paths]], flags flags[open_flags], mode const[0]) fd_gpio_sysfs
++write$gpio_sim_live(fd fd_gpio_sysfs, buf ptr[in, string[gpio_sim_live_values]], count bytesize[buf])
++
++gpio_sim_live_values = "0", "1", "Y", "N"
++
++gpio_sim_num_lines_paths = "/sys/kernel/config/gpio-sim/syz0/bank0/num_lines", "/sys/kernel/config/gpio-sim/syz0/bank1/num_lines", "/sys/kernel/config/gpio-sim/syz/bank0/num_lines", "/sys/kernel/config/gpio-sim/syz1/bank0/num_lines"
++
++openat$gpio_sim_num_lines(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_num_lines_paths]], flags flags[open_flags], mode const[0]) fd_gpio_sysfs
++write$gpio_sim_num_lines(fd fd_gpio_sysfs, buf ptr[in, string[gpio_sim_num_lines_values]], count bytesize[buf])
++
++gpio_sim_num_lines_values = "0", "1", "8", "16", "32", "64", "256", "1024", "1025", "-1"
++
++gpio_sim_label_paths = "/sys/kernel/config/gpio-sim/syz0/bank0/label", "/sys/kernel/config/gpio-sim/syz0/bank1/label", "/sys/kernel/config/gpio-sim/syz/bank0/label"
++
++openat$gpio_sim_label(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_label_paths]], flags flags[open_flags], mode const[0]) fd_gpio_sysfs
++write$gpio_sim_label(fd fd_gpio_sysfs, buf ptr[in, array[int8]], count bytesize[buf])
++
++gpio_sim_line_name_paths = "/sys/kernel/config/gpio-sim/syz0/bank0/line0/name", "/sys/kernel/config/gpio-sim/syz0/bank0/line1/name", "/sys/kernel/config/gpio-sim/syz0/bank0/line2/name", "/sys/kernel/config/gpio-sim/syz/bank0/line0/name"
++
++openat$gpio_sim_line_name(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_line_name_paths]], flags flags[open_flags], mode const[0]) fd_gpio_sysfs
++write$gpio_sim_line_name(fd fd_gpio_sysfs, buf ptr[in, array[int8]], count bytesize[buf])
++
++gpio_sim_hog_name_paths = "/sys/kernel/config/gpio-sim/syz0/bank0/line0/hog/name", "/sys/kernel/config/gpio-sim/syz0/bank0/line1/hog/name", "/sys/kernel/config/gpio-sim/syz0/bank0/line2/hog/name", "/sys/kernel/config/gpio-sim/syz0/bank0/line3/hog/name"
++
++openat$gpio_sim_hog_name(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_hog_name_paths]], flags flags[open_flags], mode const[0]) fd_gpio_sysfs
++write$gpio_sim_hog_name(fd fd_gpio_sysfs, buf ptr[in, array[int8]], count bytesize[buf])
++
++gpio_sim_hog_direction_paths = "/sys/kernel/config/gpio-sim/syz0/bank0/line0/hog/direction", "/sys/kernel/config/gpio-sim/syz0/bank0/line1/hog/direction", "/sys/kernel/config/gpio-sim/syz0/bank0/line2/hog/direction", "/sys/kernel/config/gpio-sim/syz0/bank0/line3/hog/direction"
++
++openat$gpio_sim_hog_direction(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_hog_direction_paths]], flags flags[open_flags], mode const[0]) fd_gpio_sysfs
++write$gpio_sim_hog_direction(fd fd_gpio_sysfs, buf ptr[in, string[gpio_sim_hog_direction_values]], count bytesize[buf])
++
++gpio_sim_hog_direction_values = "input", "output-high", "output-low", "garbage"
++
++gpio_sim_readable_paths = "/sys/kernel/config/gpio-sim/syz/live", "/sys/kernel/config/gpio-sim/syz/dev_name", "/sys/kernel/config/gpio-sim/syz/bank0/chip_name", "/sys/kernel/config/gpio-sim/syz/bank0/label", "/sys/kernel/config/gpio-sim/syz0/dev_name", "/sys/kernel/config/gpio-sim/syz0/bank0/chip_name"
++
++openat$gpio_sim_read(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_readable_paths]], flags const[0], mode const[0]) fd_gpio_sysfs
++read$gpio_sim_sysfs(fd fd_gpio_sysfs, buf ptr[out, array[int8]], count len[buf])
++
++# ==================== GPIO-SIM SYSFS PULL/VALUE ====================
++# Writing pull triggers IRQ events on the line; the only path into cdev edge detection.
++
++gpio_sim_pull_paths = "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio0/pull", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio1/pull", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio2/pull", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio3/pull", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio4/pull", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio5/pull", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio6/pull", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio7/pull"
++
++openat$gpio_sim_pull(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_pull_paths]], flags flags[open_flags], mode const[0]) fd_gpio_sysfs
++write$gpio_sim_pull(fd fd_gpio_sysfs, buf ptr[in, string[gpio_sim_pull_values]], count bytesize[buf])
++
++gpio_sim_pull_values = "pull-up", "pull-down"
++
++gpio_sim_value_paths = "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio0/value", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio1/value", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio2/value", "/sys/devices/platform/gpio-sim.0/gpiochip0/sim_gpio3/value"
++
++openat$gpio_sim_value(fd const[AT_FDCWD], path ptr[in, string[gpio_sim_value_paths]], flags const[0], mode const[0]) fd_gpio_sysfs
++
++# ==================== PLATFORM DRIVER BIND/UNBIND ====================
++
++sysfs_gpio_sim_unbind = "/sys/bus/platform/drivers/gpio-sim/unbind"
++sysfs_gpio_sim_bind = "/sys/bus/platform/drivers/gpio-sim/bind"
++
++openat$gpio_sim_unbind(fd const[AT_FDCWD], file ptr[in, string[sysfs_gpio_sim_unbind]], flags const[O_WRONLY], mode const[0]) fd_gpio_sysfs
++openat$gpio_sim_bind(fd const[AT_FDCWD], file ptr[in, string[sysfs_gpio_sim_bind]], flags const[O_WRONLY], mode const[0]) fd_gpio_sysfs
++
++write$gpio_sim_unbind(fd fd_gpio_sysfs, data ptr[in, string["gpio-sim.0"]], len const[10])
++write$gpio_sim_bind(fd fd_gpio_sysfs, data ptr[in, string["gpio-sim.0"]], len const[10])
++
++# ==================== GPIO-AGGREGATOR ====================
++
++sysfs_gpio_aggr_new = "/sys/bus/platform/drivers/gpio-aggregator/new_device"
++sysfs_gpio_aggr_del = "/sys/bus/platform/drivers/gpio-aggregator/delete_device"
++
++openat$gpio_aggr_new(fd const[AT_FDCWD], file ptr[in, string[sysfs_gpio_aggr_new]], flags const[O_WRONLY], mode const[0]) fd_gpio_sysfs
++openat$gpio_aggr_del(fd const[AT_FDCWD], file ptr[in, string[sysfs_gpio_aggr_del]], flags const[O_WRONLY], mode const[0]) fd_gpio_sysfs
++
++# new_device parser: tokenises via next_arg(), parses bitmap ranges with
++# bitmap_parselist(), falls back to named-line lookup. Split into categories
++# so the fuzzer can attribute coverage per input class.
++
++write$gpio_aggr_new_chip(fd fd_gpio_sysfs, data ptr[in, string[gpio_aggr_chip]], len bytesize[data])
++write$gpio_aggr_new_range(fd fd_gpio_sysfs, data ptr[in, string[gpio_aggr_range]], len bytesize[data])
++write$gpio_aggr_new_multi(fd fd_gpio_sysfs, data ptr[in, string[gpio_aggr_multi]], len bytesize[data])
++write$gpio_aggr_new_named(fd fd_gpio_sysfs, data ptr[in, string[gpio_aggr_named]], len bytesize[data])
++write$gpio_aggr_new_bad(fd fd_gpio_sysfs, data ptr[in, string[gpio_aggr_bad]], len bytesize[data])
++
++gpio_aggr_chip = "gpiochip0 0", "gpiochip0 1", "gpiochip0 7", "gpiochip0 511", "gpiochip99 0"
++
++gpio_aggr_range = "gpiochip0 0-3", "gpiochip0 0,2,4", "gpiochip0 0,2-4", "gpiochip0 0-7", "gpiochip0 0,1,2,3,4,5,6,7", "gpiochip0 0,0,0,0", "gpiochip0 7-0", "gpiochip0 -1", "gpiochip0 0-511", "gpiochip0 0-512"
++
++gpio_aggr_multi = "gpiochip0 0 gpiochip0 1", "gpiochip0 0-1 gpiochip0 2-3", "gpiochip0 0 gpiochip0 1 gpiochip0 2 gpiochip0 3"
++
++gpio_aggr_named = "syz-line-0", "syz-line-0 syz-line-1", "syz-line-0 syz-line-1 syz-line-2 syz-line-3", "gpiochip0 0 syz-line-1", "syz-line-1 gpiochip0 0", "nonexistent-line"
++
++gpio_aggr_bad = "gpiochip0", "gpiochip0 ", " gpiochip0 0", "gpiochip0  0", "nonexistent 0", "", " ", "a", "a b c d", "gpiochip0\t0"
++
++write$gpio_aggr_del(fd fd_gpio_sysfs, data ptr[in, string[gpio_aggr_del_strings]], len bytesize[data])
++
++gpio_aggr_del_strings = "gpio-aggregator.0", "gpio-aggregator.1", "gpio-aggregator.2", "gpio-aggregator.255", "gpio-aggregator.4294967295", "gpio-aggregator.-1", "gpio-aggregator.", "gpio-aggregator", "gpio-aggregator.0 extra", "unrelated.0", ""
+diff --git a/sys/linux/dev_gpio.txt.const b/sys/linux/dev_gpio.txt.const
+new file mode 100644
+index 0000000..1724cfa
+--- /dev/null
++++ b/sys/linux/dev_gpio.txt.const
+@@ -0,0 +1,52 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AT_FDCWD = amd64:18446744073709551516
++GPIOEVENT_REQUEST_BOTH_EDGES = amd64:3
++GPIOEVENT_REQUEST_FALLING_EDGE = amd64:2
++GPIOEVENT_REQUEST_RISING_EDGE = amd64:1
++GPIOHANDLE_GET_LINE_VALUES_IOCTL = amd64:3225465864
++GPIOHANDLE_REQUEST_ACTIVE_LOW = amd64:4
++GPIOHANDLE_REQUEST_BIAS_DISABLE = amd64:128
++GPIOHANDLE_REQUEST_BIAS_PULL_DOWN = amd64:64
++GPIOHANDLE_REQUEST_BIAS_PULL_UP = amd64:32
++GPIOHANDLE_REQUEST_INPUT = amd64:1
++GPIOHANDLE_REQUEST_OPEN_DRAIN = amd64:8
++GPIOHANDLE_REQUEST_OPEN_SOURCE = amd64:16
++GPIOHANDLE_REQUEST_OUTPUT = amd64:2
++GPIOHANDLE_SET_CONFIG_IOCTL = amd64:3226776586
++GPIOHANDLE_SET_LINE_VALUES_IOCTL = amd64:3225465865
++GPIO_GET_CHIPINFO_IOCTL = amd64:2151986177
++GPIO_GET_LINEEVENT_IOCTL = amd64:3224417284
++GPIO_GET_LINEHANDLE_IOCTL = amd64:3245126659
++GPIO_GET_LINEINFO_IOCTL = amd64:3225990146
++GPIO_GET_LINEINFO_UNWATCH_IOCTL = amd64:3221533708
++GPIO_GET_LINEINFO_WATCH_IOCTL = amd64:3225990155
++GPIO_V2_GET_LINEINFO_IOCTL = amd64:3238048773
++GPIO_V2_GET_LINEINFO_WATCH_IOCTL = amd64:3238048774
++GPIO_V2_GET_LINE_IOCTL = amd64:3260068871
++GPIO_V2_LINE_ATTR_ID_DEBOUNCE = amd64:3
++GPIO_V2_LINE_ATTR_ID_FLAGS = amd64:1
++GPIO_V2_LINE_ATTR_ID_OUTPUT_VALUES = amd64:2
++GPIO_V2_LINE_FLAG_ACTIVE_LOW = amd64:2
++GPIO_V2_LINE_FLAG_BIAS_DISABLED = amd64:1024
++GPIO_V2_LINE_FLAG_BIAS_PULL_DOWN = amd64:512
++GPIO_V2_LINE_FLAG_BIAS_PULL_UP = amd64:256
++GPIO_V2_LINE_FLAG_EDGE_FALLING = amd64:32
++GPIO_V2_LINE_FLAG_EDGE_RISING = amd64:16
++GPIO_V2_LINE_FLAG_EVENT_CLOCK_HTE = amd64:4096
++GPIO_V2_LINE_FLAG_EVENT_CLOCK_REALTIME = amd64:2048
++GPIO_V2_LINE_FLAG_INPUT = amd64:4
++GPIO_V2_LINE_FLAG_OPEN_DRAIN = amd64:64
++GPIO_V2_LINE_FLAG_OPEN_SOURCE = amd64:128
++GPIO_V2_LINE_FLAG_OUTPUT = amd64:8
++GPIO_V2_LINE_FLAG_USED = amd64:1
++GPIO_V2_LINE_GET_VALUES_IOCTL = amd64:3222320142
++GPIO_V2_LINE_SET_CONFIG_IOCTL = amd64:3239097357
++GPIO_V2_LINE_SET_VALUES_IOCTL = amd64:3222320143
++O_WRONLY = amd64:1
++__NR_ioctl = amd64:16
++__NR_mkdirat = amd64:258
++__NR_openat = amd64:257
++__NR_read = amd64:0
++__NR_rmdir = amd64:84
++__NR_write = amd64:1
+-- 
+2.50.1
+
