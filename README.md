@@ -181,6 +181,10 @@ finishes.
 # Also generate crash_analysis_table_<TIMESTAMP>.ods alongside the archive
 # (not inside — the spreadsheet is meant to be hand-edited during analysis)
 ./collect-artefacts.sh --with-analysis-table
+
+# Also save the syz-manager main page (Expert mode) as
+# syzmanager_page_<TIMESTAMP>.html for manual screenshotting
+./collect-artefacts.sh --with-page-snapshot
 ```
 
 The archive `artefacts_<TIMESTAMP>.tar.xz` contains:
@@ -214,6 +218,20 @@ with live `COUNTIF` formulas plus a legend of allowed values are appended.
 
 # From a saved HTML page (no live syz-manager needed)
 ./scripts/tools/gen-crashes-table.py -i /tmp/main.html -o my.ods
+```
+
+`scripts/tools/save-syzmanager-page.sh` — UI snapshot (inside container)
+
+Saves the syz-manager main page with Expert mode toggled on into a single
+`syzmanager_page_<TIMESTAMP>.html` file, ready to be opened in any browser
+and screenshotted by hand. Requires only `curl`; no headless renderer needed.
+
+```bash
+# Default: fetch from http://localhost:56741/ (internal port)
+./scripts/tools/save-syzmanager-page.sh
+
+# Custom output file
+./scripts/tools/save-syzmanager-page.sh -o /tmp/snapshot.html
 ```
 
 `scripts/tools/collect-coverage.sh` — coverage only (inside container)

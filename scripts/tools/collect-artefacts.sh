@@ -29,6 +29,12 @@
 # edited by hand during the analysis phase, while the artefacts archive
 # itself should stay sealed and reproducible.
 #
+# Optionally, with --with-page-snapshot, a directory
+#   syzmanager_page_<TIMESTAMP>/
+# is produced alongside the archive — a single .html file with the
+# syz-manager main page (Expert mode on), ready to be opened in a
+# browser and screenshotted by hand.
+#
 # With --trim-crashes: for each crash directory, repeated log/report/machineInfo
 # files are trimmed to the 3 most recent; reproducers are always kept in full.
 
@@ -44,13 +50,14 @@ info() { echo "  $*"; }
 WITH_RAWCOVER="false"
 TRIM_CRASHES="false"
 WITH_ANALYSIS_TABLE="false"
+WITH_PAGE_SNAPSHOT="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
             cat <<USAGE
 Usage: $(basename "$0") [--with-rawcover] [--trim-crashes]
-                        [--with-analysis-table]
+                        [--with-analysis-table] [--with-page-snapshot]
 
 Collects all fuzzing artefacts into a .tar.xz archive in \$SYZKALLER_WORKDIR.
 
@@ -65,11 +72,16 @@ OPTIONS
 
   --with-analysis-table   Also generate crash_analysis_table_<TIMESTAMP>.ods
                           alongside (NOT inside) the artefacts archive.
+
+  --with-page-snapshot    Also save the syz-manager main page (Expert mode)
+                          as syzmanager_page_<TIMESTAMP>.html alongside
+                          (NOT inside) the artefacts archive.
 USAGE
             exit 0 ;;
         --with-rawcover)        WITH_RAWCOVER="true";        shift ;;
         --trim-crashes)         TRIM_CRASHES="true";         shift ;;
         --with-analysis-table)  WITH_ANALYSIS_TABLE="true";  shift ;;
+        --with-page-snapshot)   WITH_PAGE_SNAPSHOT="true";   shift ;;
         *) die "unknown argument: $1" ;;
     esac
 done
@@ -217,5 +229,18 @@ if [[ "$WITH_ANALYSIS_TABLE" == "true" ]]; then
         echo "✅ Analysis table ready: $TABLE_OUT"
     else
         echo "  WARNING: failed to generate analysis table; archive is intact." >&2
+    fi
+fi
+
+# Optionally save the syz-manager web UI for manual screenshotting.
+# Same TIMESTAMP, single .html file alongside the archive.
+if [[ "$WITH_PAGE_SNAPSHOT" == "true" ]]; then
+    PAGE_OUT="$SYZKALLER_WORKDIR/syzmanager_page_${TIMESTAMP}.html"
+    echo "▶ Saving syz-manager UI snapshot ..."
+    if "$SCRIPT_DIR/save-syzmanager-page.sh" \
+            -u "$HTTP" -o "$PAGE_OUT"; then
+        echo "✅ Page snapshot ready: $PAGE_OUT"
+    else
+        echo "  WARNING: failed to save page snapshot; archive is intact." >&2
     fi
 fi
