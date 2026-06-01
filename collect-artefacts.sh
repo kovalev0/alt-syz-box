@@ -7,19 +7,27 @@
 source "$(dirname "$0")/project.env"
 
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
-    echo "Usage: $(basename "$0") [--with-rawcover] [--trim-crashes]"
-    echo "Runs artefact collection inside container '$DEFAULT_CONTAINER_NAME'."
-    echo "The resulting archive is placed in ./volume/workdir-*/ on the host."
-    echo ""
-    echo "  --with-rawcover    Also include vmlinux and rawcover in the archive."
-    echo "  --trim-crashes     Trim repeated log/report/machineInfo files to 3 most recent."
+    cat <<USAGE
+Usage: $(basename "$0") [--with-rawcover] [--trim-crashes] [--with-analysis-table]
+
+Runs artefact collection inside container '$DEFAULT_CONTAINER_NAME'.
+The resulting archive is placed in ./volume/workdir-*/ on the host.
+
+  --with-rawcover         Also include vmlinux and rawcover in the archive.
+  --trim-crashes          Trim repeated log/report/machineInfo files to 3 most recent.
+  --with-analysis-table   Also generate crash_analysis_table_<TIMESTAMP>.ods
+                          next to the archive (NOT inside the archive — the
+                          spreadsheet is meant to be edited by hand and the
+                          archive should stay sealed).
+USAGE
     exit 0
 fi
 
 EXTRA_ARGS=()
 for arg in "$@"; do
     case "$arg" in
-        --with-rawcover|--trim-crashes) EXTRA_ARGS+=("$arg") ;;
+        --with-rawcover|--trim-crashes|--with-analysis-table)
+            EXTRA_ARGS+=("$arg") ;;
         *) echo "ERROR: unknown argument: $arg" >&2; exit 1 ;;
     esac
 done

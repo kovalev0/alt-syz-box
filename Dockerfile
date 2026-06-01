@@ -116,6 +116,8 @@ RUN apt-get update		&& \
 	vim-common			\
 	nano				\
 	perl-JSON-PP			\
+	python3-module-beautifulsoup4	\
+	python3-module-odfpy		\
     && \
     apt-get clean
 

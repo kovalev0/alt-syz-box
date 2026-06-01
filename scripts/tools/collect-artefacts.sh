@@ -21,6 +21,14 @@
 #     [vmlinux]              only with --with-rawcover
 #     [rawcover]             only with --with-rawcover
 #
+# Optionally, with --with-analysis-table, a separate file
+#   crash_analysis_table_<TIMESTAMP>.ods
+# is produced alongside (NOT inside) the archive. The .ods carries the
+# same TIMESTAMP so it can be matched to its archive at a glance, but it
+# is kept outside the archive on purpose: the spreadsheet is meant to be
+# edited by hand during the analysis phase, while the artefacts archive
+# itself should stay sealed and reproducible.
+#
 # With --trim-crashes: for each crash directory, repeated log/report/machineInfo
 # files are trimmed to the 3 most recent; reproducers are always kept in full.
 
@@ -35,27 +43,33 @@ info() { echo "  $*"; }
 
 WITH_RAWCOVER="false"
 TRIM_CRASHES="false"
+WITH_ANALYSIS_TABLE="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
             cat <<USAGE
 Usage: $(basename "$0") [--with-rawcover] [--trim-crashes]
+                        [--with-analysis-table]
 
 Collects all fuzzing artefacts into a .tar.xz archive in \$SYZKALLER_WORKDIR.
 
 OPTIONS
-  --with-rawcover    Also include vmlinux and rawcover in the archive.
-                     Useful for post-processing coverage with addr2line.
-                     Disabled by default due to size.
+  --with-rawcover         Also include vmlinux and rawcover in the archive.
+                          Useful for post-processing coverage with addr2line.
+                          Disabled by default due to size.
 
-  --trim-crashes     Trim repeated log/report/machineInfo files in each crash
-                     directory to the 3 most recent. Reproducers are kept in
-                     full. Useful for reducing archive size.
+  --trim-crashes          Trim repeated log/report/machineInfo files in each
+                          crash directory to the 3 most recent. Reproducers
+                          are kept in full. Useful for reducing archive size.
+
+  --with-analysis-table   Also generate crash_analysis_table_<TIMESTAMP>.ods
+                          alongside (NOT inside) the artefacts archive.
 USAGE
             exit 0 ;;
-        --with-rawcover) WITH_RAWCOVER="true"; shift ;;
-        --trim-crashes)  TRIM_CRASHES="true";  shift ;;
+        --with-rawcover)        WITH_RAWCOVER="true";        shift ;;
+        --trim-crashes)         TRIM_CRASHES="true";         shift ;;
+        --with-analysis-table)  WITH_ANALYSIS_TABLE="true";  shift ;;
         *) die "unknown argument: $1" ;;
     esac
 done
@@ -190,3 +204,18 @@ echo "▶ Creating archive ..."
 XZ_OPT="-9e -T0" tar -cJf "$OUTPUT" -C "$STAGING" "artefacts_${TIMESTAMP}"
 
 echo "✅ Archive ready: $OUTPUT ($(du -sh "$OUTPUT" | cut -f1))"
+
+# Optionally generate the crash analysis table alongside the archive.
+# Same TIMESTAMP so the two files can be paired at a glance, but the .ods
+# stays OUTSIDE the archive on purpose: it is meant to be hand-edited
+# during the analysis phase, while the archive itself stays sealed.
+if [[ "$WITH_ANALYSIS_TABLE" == "true" ]]; then
+    TABLE_OUT="$SYZKALLER_WORKDIR/crash_analysis_table_${TIMESTAMP}.ods"
+    echo "▶ Generating crash analysis table ..."
+    if python3 "$SCRIPT_DIR/gen-crashes-table.py" \
+            -u "${HTTP}/" -o "$TABLE_OUT"; then
+        echo "✅ Analysis table ready: $TABLE_OUT"
+    else
+        echo "  WARNING: failed to generate analysis table; archive is intact." >&2
+    fi
+fi

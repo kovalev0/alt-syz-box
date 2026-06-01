@@ -178,8 +178,9 @@ finishes.
 # Trim repeated log/report/machineInfo files to 3 most recent per crash dir
 ./collect-artefacts.sh --trim-crashes
 
-# Combine both
-./collect-artefacts.sh --with-rawcover --trim-crashes
+# Also generate crash_analysis_table_<TIMESTAMP>.ods alongside the archive
+# (not inside — the spreadsheet is meant to be hand-edited during analysis)
+./collect-artefacts.sh --with-analysis-table
 ```
 
 The archive `artefacts_<TIMESTAMP>.tar.xz` contains:
@@ -197,6 +198,22 @@ artefacts_<TIMESTAMP>/
     index.html               browsable HTML coverage report
   vmlinux                    kernel debug binary      (only with --with-rawcover)
   rawcover                   raw PC coverage          (only with --with-rawcover)
+```
+
+`scripts/tools/gen-crashes-table.py` — analysis table (inside container)
+
+Generates `crash_analysis_table.ods` from the running syz-manager main page.
+The spreadsheet is meant to be embedded as an OLE object into the fuzzing
+report `.odt`. Cells are color-coded by value (live conditional formatting),
+analyst-facing columns have dropdowns with autocomplete, and a summary block
+with live `COUNTIF` formulas plus a legend of allowed values are appended.
+
+```bash
+# Default: fetch from http://localhost:56741/ (internal port)
+./scripts/tools/gen-crashes-table.py
+
+# From a saved HTML page (no live syz-manager needed)
+./scripts/tools/gen-crashes-table.py -i /tmp/main.html -o my.ods
 ```
 
 `scripts/tools/collect-coverage.sh` — coverage only (inside container)
