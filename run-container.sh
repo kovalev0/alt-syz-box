@@ -27,12 +27,12 @@ fi
 CONTAINER_NAME=${1:-$DEFAULT_CONTAINER_NAME}
 IMAGE_NAME=${2:-$DEFAULT_IMAGE_NAME}
 
-if [ "$(docker ps -q -f name=$CONTAINER_NAME)" ]; then
+if [ "$(docker ps -q -f name=^${CONTAINER_NAME}$)" ]; then
     echo "ℹ️ Container '$CONTAINER_NAME' is already running."
     exit 0
 fi
 
-if [ "$(docker ps -aq -f status=exited -f name=$CONTAINER_NAME)" ]; then
+if [ "$(docker ps -aq -f status=exited -f name=^${CONTAINER_NAME}$)" ]; then
     echo "🗑️ Removing existing stopped container '$CONTAINER_NAME'..."
     docker rm "$CONTAINER_NAME"
 fi

@@ -41,7 +41,7 @@ run_build() {
 }
 
 run_container() {
-    if [ "$(docker ps -q -f name=$CONTAINER_NAME)" ]; then
+    if [ "$(docker ps -q -f name=^${CONTAINER_NAME}$)" ]; then
         echo "ℹ️ (run) Container '$CONTAINER_NAME' is already running. Skipping."
     else
         echo "▶ (run) Starting Docker container..."
