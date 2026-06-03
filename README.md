@@ -8,7 +8,7 @@ This repository provides a CLI-driven, Docker-based workflow to build, configure
 -   **Centralized Configuration**: Key settings like names and ports are in `project.env`.
 -   **Modular Execution**: A powerful `run-all.sh` script to control each stage of the process.
 -   **Flexible Scripting**: Most scripts accept arguments to override defaults.
--   **Comprehensive Tooling**: Includes helpers for VM management, monitoring, and file transfer.
+-   **Comprehensive Tooling**: Includes helpers for VM management, monitoring, and artefact collection.
 
 ---
 
@@ -17,6 +17,7 @@ This repository provides a CLI-driven, Docker-based workflow to build, configure
 ```
 alt-syz-box/
 ├── build-docker-image.sh
+├── collect-artefacts.sh
 ├── config/
 │   └── syzkaller/
 │       ├── generic.config.template
@@ -157,6 +158,95 @@ docker exec -it alt-syz-box-container ./scripts/run-vm.sh -p 2222
 # Copy a directory FROM the VM
 ~/alt-syz-box/scripts/scp-from-vm.sh -p 2222 /root/crashes ./
 ```
+
+## 5. Artefact Collection
+
+`collect-artefacts.sh` — full collection (run on host)
+
+Runs the collection pipeline inside the container via `docker exec`. The resulting
+archive is placed in the container's syzkaller workdir, which is mounted to
+`./volume/workdir-<config>/` on the host and accessible immediately after the script
+finishes.
+
+```bash
+# Collect crashes, corpus, configs, coverage and log
+./collect-artefacts.sh
+
+# Also include vmlinux and rawcover (needed for addr2line post-processing)
+./collect-artefacts.sh --with-rawcover
+
+# Trim repeated log/report/machineInfo files to 3 most recent per crash dir
+./collect-artefacts.sh --trim-crashes
+
+# Also generate crash_analysis_table_<TIMESTAMP>.ods alongside the archive
+# (not inside — the spreadsheet is meant to be hand-edited during analysis)
+./collect-artefacts.sh --with-analysis-table
+
+# Also save the syz-manager main page (Expert mode) as
+# syzmanager_page_<TIMESTAMP>.html for manual screenshotting
+./collect-artefacts.sh --with-page-snapshot
+```
+
+The archive `artefacts_<TIMESTAMP>.tar.xz` contains:
+
+```
+artefacts_<TIMESTAMP>/
+  crashes/                   syz-manager crash directories
+  corpus.db                  corpus database
+  fuzzing.log                syz-manager log (/tmp/alt-syz-box.log)
+  configs/
+    config.json              desired syzkaller config (template-generated)
+    linux-<HASH>             kernel .config (hash = kernel git HEAD)
+    syzkaller-<HASH>         actual running syzkaller config (hash = syzkaller git HEAD)
+  coverage/
+    index.html               browsable HTML coverage report
+  vmlinux                    kernel debug binary      (only with --with-rawcover)
+  rawcover                   raw PC coverage          (only with --with-rawcover)
+```
+
+`scripts/tools/gen-crashes-table.py` — analysis table (inside container)
+
+Generates `crash_analysis_table.ods` from the running syz-manager main page.
+The spreadsheet is meant to be embedded as an OLE object into the fuzzing
+report `.odt`. Cells are color-coded by value (live conditional formatting),
+analyst-facing columns have dropdowns with autocomplete, and a summary block
+with live `COUNTIF` formulas plus a legend of allowed values are appended.
+
+```bash
+# Default: fetch from http://localhost:56741/ (internal port)
+./scripts/tools/gen-crashes-table.py
+
+# From a saved HTML page (no live syz-manager needed)
+./scripts/tools/gen-crashes-table.py -i /tmp/main.html -o my.ods
+```
+
+`scripts/tools/save-syzmanager-page.sh` — UI snapshot (inside container)
+
+Saves the syz-manager main page with Expert mode toggled on into a single
+`syzmanager_page_<TIMESTAMP>.html` file, ready to be opened in any browser
+and screenshotted by hand. Requires only `curl`; no headless renderer needed.
+
+```bash
+# Default: fetch from http://localhost:56741/ (internal port)
+./scripts/tools/save-syzmanager-page.sh
+
+# Custom output file
+./scripts/tools/save-syzmanager-page.sh -o /tmp/snapshot.html
+```
+
+`scripts/tools/collect-coverage.sh` — coverage only (inside container)
+
+Fetches the HTML coverage page from syz-manager and saves it to a local directory.
+
+```bash
+# Default output: $SYZKALLER_WORKDIR/coverage_<TIMESTAMP>/
+./scripts/tools/collect-coverage.sh
+
+# Custom output directory
+./scripts/tools/collect-coverage.sh -o /tmp/my-coverage
+```
+
+---
 
 ## License
 This project is licensed under the GNU General Public License v3.0. See the LICENSE file for details.
