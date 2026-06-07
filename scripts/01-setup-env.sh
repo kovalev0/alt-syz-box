@@ -29,7 +29,7 @@ export CONTAINER_REPO_DIR="/home/user/alt-syz-box"
 # Default is ALT Linux kernel, but you can change it to mainline or any other kernel
 export KERNEL_GIT_URL="git://git.altlinux.org/people/kernelbot/packages/kernel-image.git"
 # export KERNEL_GIT_TAG="kernel-image-6.12-6.12.59-alt1"
-export KERNEL_GIT_TAG="kernel-image-6.12-6.12.85-alt0.c10f.2"
+export KERNEL_GIT_TAG="kernel-image-6.12-6.12.91-alt0.c10f.2"
 
 # To use the LVC fork version, uncomment these lines:
 # export KERNEL_GIT_URL="https://git.linuxtesting.ru/pub/scm/linux/kernel/git/lvc/linux-stable.git"
