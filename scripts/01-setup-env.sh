@@ -11,8 +11,12 @@
 # --- ⚙️ User Configuration ---
 export TERM="xterm-256color"
 
-# General kernel local verion
-export KERNEL_LOCALVERSION="alt-syz-box"
+# General kernel local version.
+# Honour a value provided by the caller instead of overwriting it: the
+# unit-tests flow (scripts/06-run-unit-tests.sh) needs a gcov-instrumented
+# kernel and signals that by putting the substring "gcov" here, which
+# scripts/02-build-kernel.sh keys on to enable GCOV_KERNEL/GCOV_PROFILE_ALL.
+export KERNEL_LOCALVERSION="alt-syz-box-gcov-unit-tests"
 
 # Select which syzkaller config template to use from 'config/syzkaller/'
 export SYZ_CONFIG_TEMPLATE="generic"
@@ -126,5 +130,14 @@ export SSH_KEY_PATH="$IMAGE_DIR/id_rsa"
 
 # QEMU VM Configuration
 export DEBUG_VM_LOG_FILE="$BASE_DIR/vm_boot.linux-${KERNEL_GIT_TAG}.log"
+
+# Unit-tests paths (see scripts/06-run-unit-tests.sh).
+# The targets catalog and guest-side test drivers live in the repo; per-target
+# sources, built modules and coverage reports go under the persistent volume.
+export UNIT_TESTS_TARGETS_DIR="$CONTAINER_REPO_DIR/config/unit-tests/targets"
+export UNIT_TESTS_TESTS_DIR="$CONTAINER_REPO_DIR/config/unit-tests/tests"
+export UNIT_TESTS_DIR="$BASE_DIR/unit-tests"
+export UNIT_TESTS_NETFILTER_KCONFIG="$CONTAINER_REPO_DIR/config/unit-tests/netfilter-kconfig.list"
+export UNIT_TESTS_PATCHES_DIR="$CONTAINER_REPO_DIR/patches/unit-tests"
 
 echo "✅ Environment variables are set for config: ${SYZ_CONFIG_TEMPLATE}"
