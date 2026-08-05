@@ -9,6 +9,7 @@ This repository provides a CLI-driven, Docker-based workflow to build, configure
 -   **Modular Execution**: A powerful `run-all.sh` script to control each stage of the process.
 -   **Flexible Scripting**: Most scripts accept arguments to override defaults.
 -   **Comprehensive Tooling**: Includes helpers for VM management, monitoring, and artefact collection.
+-   **Unit Tests with Coverage**: A `unit-tests` mode builds a gcov-instrumented kernel and out-of-tree modules, runs their tests in a VM, and reports per-module line coverage.
 
 ---
 
@@ -19,10 +20,14 @@ alt-syz-box/
 ├── build-docker-image.sh
 ├── collect-artefacts.sh
 ├── config/
-│   └── syzkaller/
-│       ├── generic.config.template
-│       ├── example.config.template
-│       └── ...
+│   ├── syzkaller/
+│   │   ├── generic.config.template
+│   │   ├── example.config.template
+│   │   └── ...
+│   └── unit-tests/
+│       ├── README.md
+│       ├── targets/
+│       └── tests/
 ├── Dockerfile
 ├── enter-container.sh
 ├── LICENSE
@@ -44,6 +49,10 @@ alt-syz-box/
 │   ├── 03-build-qemu.sh
 │   ├── 04-build-syzkaller.sh
 │   ├── 05-build-image.sh
+│   ├── 06-run-unit-tests.sh
+│   ├── lib/
+│   │   ├── vm-lib.sh
+│   │   └── gcov-lib.sh
 │   ├── run-vm.sh
 │   ├── scp-from-vm.sh
 │   ├── scp-to-vm.sh
@@ -101,6 +110,98 @@ You can also run each major stage individually. This is useful for development a
 # Start the fuzzer
 ./run-all.sh fuzzer
 ```
+
+### Unit Tests (kernel-module coverage)
+
+`run-all.sh unit-tests` builds a gcov-instrumented kernel (`CONFIG_GCOV_KERNEL`),
+builds the selected out-of-tree modules against it, runs their in-guest test
+drivers inside a QEMU VM, and collects per-module line coverage from
+`/sys/kernel/debug/gcov`. Syzkaller is **not** built or used in this mode.
+
+```bash
+# Full run: build gcov kernel + qemu + image -> build modules -> test -> report
+./run-all.sh unit-tests
+
+# Flags (can appear anywhere on the command line):
+#   --keep-vm      Leave the guest running at the end (useful for debugging)
+#   --sanitizers   Enable KASAN/UBSAN/LOCKDEP in the kernel (off by default)
+./run-all.sh unit-tests --keep-vm
+./run-all.sh unit-tests --sanitizers
+
+# Restrict to a subset of the target catalog
+TARGETS="dm-secdel ipt-so" ./run-all.sh unit-tests
+
+# Fine-grained steps (run inside the container):
+./scripts/06-run-unit-tests.sh env   # only: gcov kernel + qemu + image
+./scripts/06-run-unit-tests.sh run   # only: build modules + test + collect
+./scripts/06-run-unit-tests.sh list  # list enabled targets and exit
+```
+
+#### Targets
+
+Targets are declared in `config/unit-tests/targets/*.conf` — one file per
+module. Each conf sets where to fetch the sources, how to build them against
+the gcov kernel, which kernel config symbols it needs, which extra guest
+packages to install, and which in-guest driver (`config/unit-tests/tests/*.sh`)
+to run.
+
+| Target | Default | Description |
+|---|:---:|---|
+| `dm-secdel` | ✅ | Device-mapper secure-delete target |
+| `ipt-so` | ✅ | `xt_so.ko` — CIPSO/Astra IP security-label iptables match |
+| `xtables-addons` | ✅ | 25+ out-of-tree iptables match/target modules |
+| `kselftests` | ❌ | Linux kernel self-tests (full-kernel gcov; opt-in only) |
+
+**`TARGET_DEFAULT=0`** targets are skipped in the default run. They run only
+when named explicitly in `TARGETS`:
+
+```bash
+# kselftests requires GCOV_PROFILE_ALL -> heavier rebuild + large image
+TARGETS="kselftests" ./run-all.sh unit-tests
+
+# Mix with a module target
+TARGETS="kselftests dm-secdel" ./run-all.sh unit-tests
+```
+
+#### Kernel instrumentation
+
+By default only **`CONFIG_GCOV_KERNEL=y`** is set (the gcov framework without
+full-kernel profiling). Before each module is compiled the orchestrator injects
+`GCOV_PROFILE := y` into its Makefile so the kernel build system instruments
+only that module's translation units — no overhead elsewhere.
+
+For `kselftests`, `TARGET_KCONFIG="GCOV_PROFILE_ALL"` enables full-kernel
+instrumentation so that every kernel path exercised by the self-tests accumulates
+coverage data.
+
+Sanitizers (KASAN, UBSAN, LOCKDEP, fault injection) are **off by default** to
+avoid slowdown and spurious panics from out-of-tree modules. Enable them with
+`--sanitizers` (sets `ENABLE_SANITIZERS=1` in `02-build-kernel.sh`).
+
+#### Reports
+
+Build and test output is streamed to the terminal live (via `tee`) and also
+saved to per-target log files on the host volume:
+
+```
+~/volume/unit-tests/summary.txt             line rate + paths for every target
+~/volume/unit-tests/<target>/reports/
+  build.log          module build output (host container side)
+  tests.log          in-guest test driver output
+  coverage.info      lcov tracefile (scoped to the module)
+  coverage-summary.txt  lcov --summary (line/function rates)
+  report.pdf         genhtml index.html rendered as PDF
+  html/index.html    browsable HTML coverage report
+```
+
+The line-coverage percentage for each target is printed to the console at the
+end of the run. `report.pdf` is produced by `scripts/tools/html-to-pdf.sh`
+(wkhtmltopdf -> headless Chromium -> stdlib text fallback).
+
+#### Adding a new target
+
+See **[config/unit-tests/README.md](./config/unit-tests/README.md)**.
+
 
 ## 3. Manual Usage
 
