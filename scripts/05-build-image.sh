@@ -112,10 +112,10 @@ else
     echo "The list of packages is empty. Installation skipped."
 fi
 
-# 6. Copy syzkaller/bin/linux_amd64 to image
+# 7. Copy syzkaller/bin/linux_amd64 to image
 sudo cp -rf "$SYZKALLER_DIR/bin/linux_amd64" "$IMAGE_MOUNT_DIR/bin/"
 
-# 7. Remove vfat mount to avoid conflicts on boot
+# 8. Remove vfat mount to avoid conflicts on boot
 sudo sed -i '/vfat/d' "$IMAGE_MOUNT_DIR/etc/fstab"
 
 # END. Final adjustments and unmount
