@@ -82,7 +82,18 @@ sudo cp "$SSH_KEY_PATH.pub" "$IMAGE_MOUNT_DIR/root/.ssh/authorized_keys"
 sudo chmod 700 "$IMAGE_MOUNT_DIR/root/.ssh"
 sudo chmod 600 "$IMAGE_MOUNT_DIR/root/.ssh/authorized_keys"
 
-# 5. Install packages to image
+# 5. Configure automatic root login on the serial console (ttyS0).
+echo "Configuring serial console autologin..."
+GETTY_DROP="$IMAGE_MOUNT_DIR/etc/systemd/system/serial-getty@ttyS0.service.d"
+sudo mkdir -p "$GETTY_DROP"
+sudo tee "$GETTY_DROP/autologin.conf" > /dev/null << 'AUTOLOGIN'
+[Service]
+# Clear the inherited ExecStart before overriding it (systemd requirement).
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --keep-baud 115200,38400,9600 %I $TERM
+AUTOLOGIN
+
+# 6. Install packages to image
 if [ -n "$PACKAGES_TO_INSTALL" ]; then
     echo "Installing packages ($PACKAGES_TO_INSTALL) via chroot..."
     # Prepare chroot environment by mounting necessary virtual filesystems
