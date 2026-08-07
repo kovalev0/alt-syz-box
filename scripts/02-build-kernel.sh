@@ -105,6 +105,10 @@ cat "$KERNEL_DIR"/arch/x86/configs/x86_64_defconfig >> "$KERNEL_BUILD_DIR/.confi
 
 #----------------------------------------------------
 
+# LVC syzkaller-specific config (sanitizers, fault injection, lockdep).
+# Disabled by default to avoid overhead. Enable with ENABLE_SANITIZERS=1.
+if [ "${ENABLE_SANITIZERS:-0}" = "1" ]; then
+    echo "▶ Enabling sanitizers/LVC options (ENABLE_SANITIZERS=1)"
 # Apply detailed LVC syzkaller-specific kernel config options
 # Reference: https://portal.linuxtesting.ru/LVCFuzzingKernelOptions.html
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
@@ -125,7 +129,7 @@ cat "$KERNEL_DIR"/arch/x86/configs/x86_64_defconfig >> "$KERNEL_BUILD_DIR/.confi
     --set-val DEBUG_INFO_COMPRESSED n --set-val DEBUG_INFO_SPLIT n \
     -e DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT --set-val DEBUG_INFO_BTF n -e PVH \
     -e KALLSYMS -e KALLSYMS_ALL -e CMDLINE_BOOL \
-    --set-str CMDLINE "earlyprintk=serial net.ifnames=0 sysctl.kernel.hung_task_all_cpu_backtrace=1 ima_policy=tcb nf-conntrack-ftp.ports=20000 nf-conntrack-tftp.ports=20000 nf-conntrack-sip.ports=20000 nf-conntrack-irc.ports=20000 nf-conntrack-sane.ports=20000 binder.debug_mask=0 rcupdate.rcu_expedited=1 no_hash_pointers page_owner=on sysctl.vm.nr_hugepages=4 sysctl.vm.nr_overcommit_hugepages=4 secretmem.enable=1 msr.allow_writes=off root=/dev/sda3 console=ttyS0 vsyscall=native numa=fake=2 kvm-intel.nested=1 spec_store_bypass_disable=prctl nopcid vivid.n_devs=16 vivid.multiplanar=1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2 netrom.nr_ndevs=16 rose.rose_ndevs=16 dummy_hcd.num=8 smp.csd_lock_timeout=100000 watchdog_thresh=55 workqueue.watchdog_thresh=140 sysctl.net.core.netdev_unregister_timeout_secs=140 panic_on_warn=1" \
+    --set-str CMDLINE "earlyprintk=serial net.ifnames=0 sysctl.kernel.hung_task_all_cpu_backtrace=1 ima_policy=tcb nf-conntrack-ftp.ports=20000 nf-conntrack-tftp.ports=20000 nf-conntrack-sip.ports=20000 nf-conntrack-irc.ports=20000 nf-conntrack-sane.ports=20000 binder.debug_mask=0 rcupdate.rcu_expedited=1 no_hash_pointers page_owner=on sysctl.vm.nr_hugepages=4 sysctl.vm.nr_overcommit_hugepages=4 secretmem.enable=1 msr.allow_writes=off root=/dev/sda3 console=ttyS0 vsyscall=native numa=fake=2 kvm-intel.nested=1 spec_store_bypass_disable=prctl nopcid vivid.n_devs=16 vivid.multiplanar=1,2,1,2,1,2,1,2,1,2,1,2,1,2,1,2 netrom.nr_ndevs=16 rose.rose_ndevs=16 dummy_hcd.num=8 smp.csd_lock_timeout=100000 watchdog_thresh=55 workqueue.watchdog_thresh=140 sysctl.net.core.netdev_unregister_timeout_secs=140 panic_on_warn=0" \
     --set-val CMDLINE_OVERRIDE n -e TUN -e MAC80211_HWSIM \
     --set-val IEEE802154_FAKELB n -e IEEE802154_HWSIM -e USB_DUMMY_HCD -e USB_RAW_GADGET \
     -e BT_HCIVHCI -e UBSAN -e UBSAN_SANITIZE_ALL --set-val UBSAN_TRAP n \
@@ -135,6 +139,7 @@ cat "$KERNEL_DIR"/arch/x86/configs/x86_64_defconfig >> "$KERNEL_BUILD_DIR/.confi
     --set-val UBSAN_ENUM n --set-val UBSAN_ALIGNMENT n \
     --set-val DEVMEM n --set-val DEVKMEM n --set-val DEVPORT n --set-val UPROBE_EVENTS n \
     --set-val MODULE_FORCE_UNLOAD n -e SECURITY_TOMOYO_INSECURE_BUILTIN_SETTING
+fi
 
 # Enable virtual kernel filesystems that allow the fuzzer to interact with a wider range of kernel features:
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
@@ -168,6 +173,27 @@ else
     # All built-in (other default fuzz version)
     # sed -i "s|=m|=y|" "$KERNEL_BUILD_DIR/.config"
     echo "Skip \"All built-in\", use ALT release config"
+fi
+
+# Enable any extra symbols requested via the environment. The unit-tests flow
+# uses this to switch on the subsystems its target modules depend on (device
+# mapper, loop, netfilter/x_tables, ...). Empty by default, so the fuzzing flow
+# is unaffected. olddefconfig below reconciles unmet dependencies.
+if [ -n "${EXTRA_KCONFIG_ENABLE:-}" ]; then
+    echo "▶ Enabling extra kernel config: $EXTRA_KCONFIG_ENABLE"
+    for sym in $EXTRA_KCONFIG_ENABLE; do
+        ./scripts/config --file "$KERNEL_BUILD_DIR/.config" -e "$sym"
+    done
+fi
+
+# Symbols to force-disable (e.g. WERROR, so that building out-of-tree modules
+# against this kernel is not derailed by a benign -Werror #warning). Empty by
+# default. olddefconfig below reconciles dependencies.
+if [ -n "${EXTRA_KCONFIG_DISABLE:-}" ]; then
+    echo "▶ Disabling extra kernel config: $EXTRA_KCONFIG_DISABLE"
+    for sym in $EXTRA_KCONFIG_DISABLE; do
+        ./scripts/config --file "$KERNEL_BUILD_DIR/.config" -d "$sym"
+    done
 fi
 
 make ARCH=x86_64 O="$KERNEL_BUILD_DIR" olddefconfig
