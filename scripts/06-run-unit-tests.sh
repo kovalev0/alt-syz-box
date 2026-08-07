@@ -190,9 +190,8 @@ test_target() {
     local reports="$work/reports"
     mkdir -p "$reports"
 
-    echo "  -> resetting gcov counters and shipping sources to the guest"
+    echo "  -> shipping sources to the guest"
     vm_ssh "mount -t debugfs none /sys/kernel/debug 2>/dev/null || true"
-    vm_ssh "$(gcov_guest_reset_cmd)" || true
     vm_ssh "rm -rf $gdir && mkdir -p $gdir" || return 1
     vm_scp_to "$TARGET_SRC" "$gdir/src" || return 1
     vm_scp_to "$UNIT_TESTS_TESTS_DIR/$TARGET_GUEST_TEST" "$gdir/test.sh" || return 1
@@ -202,27 +201,21 @@ test_target() {
 
     echo "  -> collecting coverage"
     if [ "${TARGET_COVERAGE_MODE:-module}" = "kernel" ]; then
-        # kselftests mode: the guest ran lcov itself and wrote coverage.info.
-        # Fetch it directly and generate the HTML report on the host.
-        vm_scp_from /tmp/kselftests_coverage.info "$reports/coverage.info" || true
-        if [ -s "$reports/coverage.info" ]; then
-            lcov --summary "$reports/coverage.info" \
-                > "$reports/coverage-summary.txt" 2>&1 || true
-            genhtml "$reports/coverage.info" \
-                --output-directory "$reports/html" >/dev/null 2>&1 || true
-            local h2p; h2p="$SCRIPT_DIR/tools/html-to-pdf.sh"
-            [ -f "$h2p" ] && [ -f "$reports/html/index.html" ] && \
-                bash "$h2p" "$reports/html/index.html" "$reports/report.pdf" \
-                    "$reports/coverage.info" >/dev/null 2>&1 || true
-            local rate; rate=$(grep -Eo 'lines[^0-9]*[0-9.]+%' \
-                "$reports/coverage-summary.txt" 2>/dev/null \
-                | grep -Eo '[0-9.]+%' | head -1)
-            echo "✅ $TARGET_NAME: lines ${rate:-n/a}"
-            echo "   HTML:  $reports/html/index.html"
-            [ -f "$reports/report.pdf" ] && echo "   PDF:   $reports/report.pdf"
-        else
-            echo "⚠️  No coverage.info from kselftests guest (lcov not run?)." >&2
-        fi
+        # kselftests mode: kernel-wide gcov. The kernel is built in the
+        # container, so its .gcno live only under $KERNEL_BUILD_DIR there; the
+        # guest's debugfs exposes the matching .gcda but its .gcno are symlinks
+        # into that build tree, which is absent inside the guest. lcov therefore
+        # cannot run in the guest ("cannot open notes file"). Pull the whole
+        # gcov debugfs tree from the guest and pair each .gcda with the
+        # container-side .gcno on the host, exactly as the per-module targets do.
+        echo "  -> pulling kernel gcda from the guest debugfs"
+        vm_ssh "$(gcov_guest_tar_all_cmd /root/gcov.tgz)" || true
+        rm -rf "$work/pulled"; mkdir -p "$work/pulled"
+        vm_scp_from /root/gcov.tgz "$work/gcov.tgz" || true
+        [ -s "$work/gcov.tgz" ] && tar xzf "$work/gcov.tgz" -C "$work/pulled" 2>/dev/null
+
+        gcov_report_kernel "$work/pulled" "$KERNEL_BUILD_DIR" "$reports" "$TARGET_NAME" \
+            || echo "⚠️  No kernel coverage produced for $TARGET_NAME." >&2
     else
         vm_ssh "$(gcov_guest_tar_cmd "$TARGET_SRC" /root/gcov.tgz)" || true
         rm -rf "$work/pulled"; mkdir -p "$work/pulled"
