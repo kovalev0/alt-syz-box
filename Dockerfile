@@ -125,6 +125,13 @@ RUN apt-get update		&& \
     && \
     apt-get clean
 
+# Unit-tests tooling
+RUN apt-get update && \
+    for p in lcov autoconf automake libtool libiptables-devel wkhtmltopdf; do \
+        apt-get install -y $p || echo "WARN: package $p not installed"; \
+    done && \
+    apt-get clean
+
 # Create a non-root user
 RUN groupadd -g ${GID} ${USERNAME}				&& \
     useradd  -u ${UID} -g ${GID} -ms /bin/bash ${USERNAME}	&& \

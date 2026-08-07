@@ -1,0 +1,41 @@
+From c465ddd148dd8788c82514aad537c9b732f39011 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Tue, 4 Aug 2026 14:31:01 +0000
+Subject: [PATCH 2/2] xt_DELUDE: force a real dst reference before cloning
+ input route
+
+delude_send_reset() runs from the LOCAL_IN hook (target .hooks includes
+NF_INET_LOCAL_IN) and does skb_dst_set(nskb, dst_clone(skb_dst(oldskb))). On the
+input path skb_dst(oldskb) can be a no-ref dst (SKB_DST_NOREF, refcount 0), so
+dst_hold() inside dst_clone() warns (include/net/dst.h) and, with panic_on_warn,
+panics. Force the input skb's dst to hold a real reference with skb_dst_force()
+before cloning it, mirroring nf_reject_ipv4's handling; drop the reply if no dst
+is available.
+
+Signed-off-by: Vasiliy Kovalev <kovalev@altlinux.org>
+---
+ extensions/xt_DELUDE.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/extensions/xt_DELUDE.c b/extensions/xt_DELUDE.c
+index ba913cf..327acc5 100644
+--- a/extensions/xt_DELUDE.c
++++ b/extensions/xt_DELUDE.c
+@@ -122,7 +122,13 @@ static void delude_send_reset(struct sk_buff *oldskb,
+ #endif
+ 		addr_type = RTN_LOCAL;
+ 
+-	/* ip_route_me_harder expects skb->dst to be set */
++	/*
++	 * ip_route_me_harder() expects skb->dst to be set. On the LOCAL_IN hook
++	 * the input dst may be reference-free (SKB_DST_NOREF, refcount 0), and
++	 * dst_clone()/dst_hold() on it warns. Force a real reference first.
++	 */
++	if (skb_dst(oldskb) == NULL || !skb_dst_force(oldskb))
++		goto free_nskb;
+ 	skb_dst_set(nskb, dst_clone(skb_dst(oldskb)));
+ 	if (ip_route_me_harder(par_net(par), par->state->sk, nskb, addr_type))
+ 		goto free_nskb;
+-- 
+2.43.0
+

@@ -21,6 +21,8 @@ help() {
     echo "  syzkaller     Build syzkaller."
     echo "  image         Prepare the guest image."
     echo "  fuzzer        Start the fuzzer in the background."
+    echo "  unit-tests    Build a gcov kernel, build the out-of-tree target modules,"
+    echo "                run their tests in a VM and collect per-module coverage."
     echo "  all           Run all stages: build, container, setup, fuzzer (default)."
     echo ""
     echo "Options:"
@@ -83,6 +85,16 @@ case "$COMMAND" in
     fuzzer)
         run_container
         run_fuzzer
+        ;;
+    unit-tests)
+        run_build
+        run_container
+        echo "▶ (unit-tests) Running the unit-test coverage flow inside the container..."
+        docker exec \
+            ${TARGETS:+-e "TARGETS=$TARGETS"} \
+            ${ENABLE_SANITIZERS:+-e "ENABLE_SANITIZERS=$ENABLE_SANITIZERS"} \
+            "$CONTAINER_NAME" "./scripts/06-run-unit-tests.sh" "${@:2}"
+        echo "ℹ️ Coverage reports are under ./volume/unit-tests/<target>/reports/ on the host."
         ;;
     all)
         run_build

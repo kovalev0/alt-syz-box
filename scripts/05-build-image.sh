@@ -111,6 +111,13 @@ else
     echo "Image size is already ${TARGET_IMAGE_SIZE_GB}GB or larger. Skipping expansion."
 fi
 
+# Extra packages requested via the environment (e.g. the unit-tests flow needs
+# iptables/dmsetup/... in the guest). Appended unconditionally so they are also
+# installed when reusing an already-downloaded image.
+if [ -n "${EXTRA_IMAGE_PACKAGES:-}" ]; then
+    PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL $EXTRA_IMAGE_PACKAGES"
+fi
+
 # 2. Mount the image partition
 echo "Mounting the image file system..."
 SECTOR_SIZE=$(sudo fdisk -l "$IMAGE_PATH" | awk '/^Units:/ {print $8}')
@@ -156,16 +163,23 @@ if [ -n "$PACKAGES_TO_INSTALL" ]; then
     # Fix DNS resolution inside chroot
     sudo rm -f "$IMAGE_MOUNT_DIR/etc/resolv.conf"
     sudo cp /etc/resolv.conf "$IMAGE_MOUNT_DIR/etc/resolv.conf"
-    # Execute installation inside chroot
-    sudo chroot "$IMAGE_MOUNT_DIR" /bin/bash -c "apt-get update && apt-get install -y $PACKAGES_TO_INSTALL && apt-get clean"
+    # Execute installation inside chroot. Install package-by-package so that an
+    # optional package missing from the branch does not abort image preparation.
+    sudo chroot "$IMAGE_MOUNT_DIR" /bin/bash -c "apt-get update; for p in $PACKAGES_TO_INSTALL; do apt-get install -y \$p || echo \"WARN: package \$p not installed\"; done; apt-get clean"
 
     # The cleanup function (trap) will automatically unmount /dev, /sys, /proc here.
 else
     echo "The list of packages is empty. Installation skipped."
 fi
 
-# 7. Copy syzkaller/bin/linux_amd64 to image
-sudo cp -rf "$SYZKALLER_DIR/bin/linux_amd64" "$IMAGE_MOUNT_DIR/bin/"
+# 7. Copy syzkaller/bin/linux_amd64 to image (only if syzkaller was built).
+# The unit-tests flow (scripts/06-run-unit-tests.sh) skips the syzkaller build,
+# so these binaries are absent there and are simply not needed.
+if [ -d "$SYZKALLER_DIR/bin/linux_amd64" ]; then
+    sudo cp -rf "$SYZKALLER_DIR/bin/linux_amd64" "$IMAGE_MOUNT_DIR/bin/"
+else
+    echo "Syzkaller binaries not found — skipping copy (expected in unit-tests mode)."
+fi
 
 # 8. Remove vfat mount to avoid conflicts on boot
 sudo sed -i '/vfat/d' "$IMAGE_MOUNT_DIR/etc/fstab"
