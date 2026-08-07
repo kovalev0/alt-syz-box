@@ -11,14 +11,12 @@
 #   1) Get the full test list from run_kselftest.sh -l
 #   2) Remove the blacklisted tests that hang or crash in QEMU
 #   3) Run tests one by one with logging
-#   4) Run lcov --capture over /sys/kernel/debug/gcov so the orchestrator
-#      can fetch a ready-made coverage.info instead of raw .gcda files
+#
 set -x
 
 KSELFTEST_DIR=/usr/lib/kselftests
 RUNNER="$KSELFTEST_DIR/run_kselftest.sh"
 RESULTS=/tmp/kselftest_results.log
-COVERAGE_INFO=/tmp/kselftests_coverage.info
 LIST=/tmp/kselftest_list.txt
 
 if [ ! -x "$RUNNER" ]; then
@@ -74,22 +72,12 @@ else
 fi
 echo "kselftests complete; results in $RESULTS"
 
-# Step 4: collect kernel-wide gcov coverage with lcov
-if command -v lcov >/dev/null 2>&1 && [ -d /sys/kernel/debug/gcov ]; then
-    echo "[INFO] Collecting kernel gcov coverage..."
-    lcov --capture \
-         --directory /sys/kernel/debug/gcov \
-         --output-file "$COVERAGE_INFO" \
-         --ignore-errors gcov,source,graph 2>/dev/null \
-      || lcov --capture \
-              --directory /sys/kernel/debug/gcov \
-              --output-file "$COVERAGE_INFO" 2>/dev/null \
-      || true
-    if [ -s "$COVERAGE_INFO" ]; then
-        echo "[OK] coverage.info written: $(wc -c < "$COVERAGE_INFO") bytes"
-    else
-        echo "[WARN] lcov produced no data"
-    fi
+# Coverage is collected on the host: the orchestrator tars the raw .gcda from
+# /sys/kernel/debug/gcov and merges them with the container-side kernel .gcno.
+# Running lcov here cannot work — the .gcno the kernel build produced are not
+# present in the guest. Confirm the counters are visible for the host to pull.
+if [ -d /sys/kernel/debug/gcov ]; then
+    echo "[INFO] kernel gcov data present; host will pull and merge .gcda"
 else
-    echo "[SKIP] lcov not available or /sys/kernel/debug/gcov not mounted"
+    echo "[WARN] /sys/kernel/debug/gcov not mounted — no kernel coverage to pull"
 fi
