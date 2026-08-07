@@ -190,9 +190,8 @@ test_target() {
     local reports="$work/reports"
     mkdir -p "$reports"
 
-    echo "  -> resetting gcov counters and shipping sources to the guest"
+    echo "  -> shipping sources to the guest"
     vm_ssh "mount -t debugfs none /sys/kernel/debug 2>/dev/null || true"
-    vm_ssh "$(gcov_guest_reset_cmd)" || true
     vm_ssh "rm -rf $gdir && mkdir -p $gdir" || return 1
     vm_scp_to "$TARGET_SRC" "$gdir/src" || return 1
     vm_scp_to "$UNIT_TESTS_TESTS_DIR/$TARGET_GUEST_TEST" "$gdir/test.sh" || return 1
