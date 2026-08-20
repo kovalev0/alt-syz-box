@@ -72,10 +72,44 @@ else
     echo "No syzkaller patches found to apply."
 fi
 
-# Extract to .const and generate:
-# go build -o bin/syz-extract ./sys/syz-extract
-# ./bin/syz-extract -os=linux -arch=amd64 -sourcedir=${KERNEL_DIR} -builddir=${KERNEL_BUILD_DIR} name_example.txt
-# make generate
+# syz-extract: regenerate .const for out-of-tree descriptions
+# Space-separated .txt basenames relative to sys/linux/ in the syzkaller tree.
+# Skip if all corresponding .const files already exist
+if [ -n "${SYZ_EXTRACT_TARGETS:-}" ]; then
+    echo "▶ Checking syz-extract targets: $SYZ_EXTRACT_TARGETS"
+
+    all_const_exist=true
+    for txt in $SYZ_EXTRACT_TARGETS; do
+        const_file="sys/linux/${txt%.txt}.txt.const"
+        if [ ! -f "$const_file" ]; then
+            all_const_exist=false
+            echo "  Missing: $const_file"
+            break
+        fi
+    done
+
+    if [ "$all_const_exist" = "true" ]; then
+        echo "  All .const files present, skipping syz-extract."
+    else
+        echo "▶ Building syz-extract..."
+        go build -o bin/syz-extract ./sys/syz-extract
+
+        echo "▶ Running syz-extract for each target..."
+        for txt in $SYZ_EXTRACT_TARGETS; do
+            echo "  syz-extract: sys/linux/$txt"
+            ./bin/syz-extract \
+                -os=linux \
+                -arch=amd64 \
+                -sourcedir="${KERNEL_DIR}" \
+                -builddir="${KERNEL_BUILD_DIR}" \
+                "$txt"
+        done
+
+        echo "▶ Running make generate..."
+        # clang-format warnings are informational only; suppress them.
+        make generate 2>&1 | grep -v "^clang-format" || true
+    fi
+fi
 
 make -j"$(nproc)"
 
