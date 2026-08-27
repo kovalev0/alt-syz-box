@@ -182,6 +182,16 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e CRYPTO_MANAGER -e CRYPTO_MANAGER_DISABLE_TESTS \
     -e CRYPTO_HMAC -e CRYPTO_SHA256
 
+# chaos_tg_init() looks up the REJECT target and the tcp match with
+# xt_request_find_target()/xt_request_find_match(), which return ERR_PTR on
+# failure -- but it tests them against NULL. When REJECT is not built the error
+# pointer sails through the check and chaos_tg() dereferences it:
+# "general protection fault in chaos_tg", 35 reboots in the last run. Building
+# both makes the pointers valid and unblocks the rest of chaos_tg().
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e IP_NF_TARGET_REJECT -e IP6_NF_TARGET_REJECT \
+    -e NETFILTER_XT_MATCH_TCPUDP
+
 # -- xtables-addons (grafted into net/netfilter/xtables-addons/)
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     -e TEXTSEARCH -e TEXTSEARCH_KMP -e TEXTSEARCH_BM -e TEXTSEARCH_FSM \
@@ -237,7 +247,8 @@ _missing=0
 for _opt in KCOV KCOV_ENABLE_COMPARISONS KCOV_INSTRUMENT_ALL KASAN DEBUG_INFO \
             NETFILTER_XTABLES IP_NF_IPTABLES IP_NF_SECURITY NETLABEL CIPSO_IPV4 \
             NETFILTER_XT_MATCH_SO NETFILTER_XT_TARGET_TARPIT \
-            CRYPTO_HMAC CRYPTO_SHA256 CRYPTO_MANAGER; do
+            CRYPTO_HMAC CRYPTO_SHA256 CRYPTO_MANAGER \
+            IP_NF_TARGET_REJECT NETFILTER_XT_MATCH_TCPUDP; do
     if ! grep -q "^CONFIG_${_opt}=y" "$KERNEL_BUILD_DIR/.config"; then
         echo "  ❌ CONFIG_${_opt} is not =y"
         _missing=1
