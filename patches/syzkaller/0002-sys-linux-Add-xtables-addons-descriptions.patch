@@ -1,4 +1,4 @@
-From 5b481cadf087bf761151d2c9c36757ec242b6ffc Mon Sep 17 00:00:00 2001
+From 7da34c663288799a78e149acfba7fd44e25397e9 Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
 Date: Thu, 27 Aug 2026 09:40:36 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
@@ -31,7 +31,7 @@ ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..9dc5602
+index 0000000..44cb26c
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
 @@ -0,0 +1,728 @@
@@ -701,14 +701,14 @@ index 0000000..9dc5602
 +}
 +
 +# ==================== IPMARK (target, rev 1) ====================
-+# NOTE: ipmark_tg4() does "newmark >>= info->shift" on a __u32 with no bound
-+# check, so any shift >= 32 is undefined behaviour. shift is left at the full
-+# __u8 range on purpose.
++# shift is capped at 31. ipmark_tg4() does "newmark >>= info->shift" on a __u32
++# with no bound check of its own, so 32 and above is undefined behaviour and
++# UBSAN turns it into a panic. Already reproduced; widen to int8 to hunt again.
 +xt_ipmark_tginfo {
 +	andmask		int32
 +	ormask		int32
 +	selector	flags[xt_ipmark_sel, int8]
-+	shift		int8
++	shift		int8[0:31]
 +}
 +
 +xt_ipmark_sel = XT_IPMARK_SRC, XT_IPMARK_DST
