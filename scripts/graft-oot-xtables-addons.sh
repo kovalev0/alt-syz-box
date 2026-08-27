@@ -124,6 +124,33 @@ NETFILTER_XT_MATCH_PSD|xt_psd.c|xt_psd.o
 NETFILTER_XT_MATCH_QUOTA2|xt_quota2.c|xt_quota2.o
 "
 
+# pknock: drop the request_module() guard in its module init.
+#
+# xt_pknock_mt_init() starts with
+#	if (request_module(crypto.algo) < 0) { pr_err(...); return -ENXIO; }
+# and request_module() is a stub returning -ENOSYS when CONFIG_MODULES=n. Even
+# with modules enabled, modprobe cannot resolve "hmac(sha256)": that is a crypto
+# template, not a module, and the guest has no /lib/modules for this kernel
+# either. So init bailed out before ever reaching crypto_alloc_shash(), the
+# match was never registered, /proc/net/xt_pknock never appeared, and
+# xt_pknock.c stayed at 0% of 214 lines while xt_find_match("pknock") failed and
+# took down every table that picked the match.
+#
+# crypto_alloc_shash() right below already reports a genuinely missing
+# transform, so the guard is pure loss in an all-builtin kernel.
+if [ -e "$DST/pknock/xt_pknock.c" ]; then
+    log "dropping the request_module() guard in pknock/xt_pknock.c"
+    sed -i '/if (request_module(crypto\.algo) < 0) {/,/^\t}$/c\
+\t/* The request_module() guard was removed by graft-oot-xtables-addons.sh:\
+\t * it returns -ENOSYS on a kernel without loadable modules, and even with\
+\t * modules enabled modprobe cannot resolve "hmac(sha256)" -- that is a\
+\t * crypto template, not a module. Either way xt_pknock_mt_init() bailed\
+\t * out with -ENXIO before ever reaching crypto_alloc_shash() below, which\
+\t * already reports a genuinely missing transform. */' "$DST/pknock/xt_pknock.c"
+    grep -q 'if (request_module(crypto' "$DST/pknock/xt_pknock.c" && \
+        log "WARNING: pknock request_module() guard still present, check the source layout"
+fi
+
 log "writing in-kernel Kbuild -> $DST/Kbuild"
 {
     echo "# In-kernel Kbuild for xtables-addons extensions."
