@@ -55,6 +55,13 @@ if [ ! -f "$IMAGE_PATH" ]; then
     unxz "./$IMAGE_FILENAME.xz"
     # Needed for C repro generation
     PACKAGES_TO_INSTALL="gcc"
+    # netlabelctl is needed by the CIPSO DOI unit installed in step 5b below.
+    # NOTE: this only runs on a fresh image download. If $IMAGE_PATH already
+    # exists, install it by hand once:
+    #   ./scripts/ssh-to-vm.sh 'apt-get update && apt-get install -y netlabel_tools'
+    if [ "${SYZ_CONFIG_TEMPLATE:-}" = "netfilter-addons" ]; then
+        PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL netlabel_tools"
+    fi
 else
     echo "Guest image $IMAGE_PATH already exists. Skipping download."
 fi
@@ -92,6 +99,38 @@ sudo tee "$GETTY_DROP/autologin.conf" > /dev/null << 'AUTOLOGIN'
 ExecStart=
 ExecStart=-/sbin/agetty --autologin root --keep-baud 115200,38400,9600 %I $TERM
 AUTOLOGIN
+
+# 5b. Register a CIPSO DOI at boot (netfilter-addons / ipt-so).
+#
+# ip_options_compile() hands every IPOPT_CIPSO option to cipso_v4_validate(),
+# which fails with -EINVAL when the DOI is not registered; the packet is then
+# dropped with ICMP_PARAMETERPROB long before it reaches any netfilter hook.
+# xt_so has no .checkentry, so its entire 64 lines live in the packet path --
+# without a registered DOI parse_cipso() / copy_msb0_bits() / bitrev64() are
+# unreachable by construction, no matter how many labelled packets
+# syz_emit_ethernet emits.
+# The Astra/IPOPT_SEC path needs no registration: it falls into the default
+# branch of ip_options_compile() and is simply skipped.
+if [ "${SYZ_CONFIG_TEMPLATE:-}" = "netfilter-addons" ]; then
+    echo "Installing CIPSO DOI registration unit..."
+    sudo tee "$IMAGE_MOUNT_DIR/etc/systemd/system/syz-cipso-doi.service" > /dev/null << 'CIPSO'
+[Unit]
+Description=Register a CIPSO DOI so that labelled packets reach netfilter
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'netlabelctl cipso add pass doi:1 tags:1 || true'
+ExecStart=/bin/sh -c 'netlabelctl unlbl setdef address:0.0.0.0/0 label:unlabelled || true'
+
+[Install]
+WantedBy=multi-user.target
+CIPSO
+    sudo mkdir -p "$IMAGE_MOUNT_DIR/etc/systemd/system/multi-user.target.wants"
+    sudo ln -sf /etc/systemd/system/syz-cipso-doi.service \
+        "$IMAGE_MOUNT_DIR/etc/systemd/system/multi-user.target.wants/syz-cipso-doi.service"
+fi
 
 # 6. Install packages to image
 if [ -n "$PACKAGES_TO_INSTALL" ]; then
