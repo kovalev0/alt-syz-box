@@ -1,4 +1,4 @@
-From 7da34c663288799a78e149acfba7fd44e25397e9 Mon Sep 17 00:00:00 2001
+From 72acc682b0aaad1d2e2675b0c0967ae0a44b16e5 Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
 Date: Thu, 27 Aug 2026 09:40:36 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
@@ -23,18 +23,18 @@ a generated rule matched essentially no packet.
 ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 (it triggers a real sysrq action in the guest).
 ---
- sys/linux/netfilter_xt_addons.txt       | 728 ++++++++++++++++++++++++
+ sys/linux/netfilter_xt_addons.txt       | 731 ++++++++++++++++++++++++
  sys/linux/netfilter_xt_addons.txt.const |  74 +++
- 2 files changed, 802 insertions(+)
+ 2 files changed, 805 insertions(+)
  create mode 100644 sys/linux/netfilter_xt_addons.txt
  create mode 100644 sys/linux/netfilter_xt_addons.txt.const
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..44cb26c
+index 0000000..ffee9d5
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
-@@ -0,0 +1,728 @@
+@@ -0,0 +1,731 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -539,11 +539,14 @@ index 0000000..44cb26c
 +
 +# ==================== quota2 (match, rev 3) ====================
 +# char name[15]; u8 flags; aligned_u64 quota; struct * master; -> sizeof == 32.
-+# A non-empty name makes q2_get_counter() look the counter up in the per-netns
-+# list and create it there, which is what exposes /proc/net/xt_quota/<name> to
-+# dev_xt_addons.txt. An empty name takes the anonymous path instead.
++# name is left empty, which takes q2_get_counter()'s anonymous path. With a
++# non-empty name it kmalloc(GFP_KERNEL)s while holding counter_list_lock ->
++# "BUG: sleeping function called from invalid context in q2_new_counter" on
++# every new (netns, name) pair. Already reproduced. Restore
++# string[xt_addon_names, 15] to hunt it again and to reach
++# /proc/net/xt_quota/<name>.
 +xt_quota_mtinfo2 {
-+	name	string[xt_addon_names, 15]
++	name	array[const[0, int8], 15]
 +	flags	flags[xt_quota2_flags, int8]
 +	quota	int64
 +	master	const[0, intptr]
