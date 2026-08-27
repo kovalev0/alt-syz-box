@@ -1,4 +1,4 @@
-From e8c4eb1a76ccfcfc24da1387ff9742cf53a651be Mon Sep 17 00:00:00 2001
+From 5b481cadf087bf761151d2c9c36757ec242b6ffc Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
 Date: Thu, 27 Aug 2026 09:40:36 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
@@ -31,7 +31,7 @@ ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..6617330
+index 0000000..9dc5602
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
 @@ -0,0 +1,728 @@
@@ -594,14 +594,13 @@ index 0000000..6617330
 +}
 +
 +# ==================== geoip (match, rev 2) ====================
-+# NOTE: xt_geoip_mt_checkentry() loops i < info->count with count being __u8
-+# while cc[] and mem[] hold only XT_GEOIP_MAX entries, so count > 31 is an
-+# out-of-bounds write past the matchinfo blob. count is left at the full __u8
-+# range on purpose so the fuzzer can reach it under KASAN/UBSAN.
++# count is clamped to the real array length. The out-of-bounds write is already
++# found and reproduced; leaving count at the full __u8 range panics the VM on
++# nearly every geoip rule (panic_on_warn=1). Widen to int8 to hunt it again.
 +# sizeof == 312.
 +xt_geoip_match_info {
 +	flags	flags[xt_geoip_flags, int8]
-+	count	int8
++	count	int8[0:XT_GEOIP_MAX]
 +	cc	array[int16, XT_GEOIP_MAX]
 +	mem	array[geoip_country_group, XT_GEOIP_MAX]
 +}
@@ -627,11 +626,12 @@ index 0000000..6617330
 +}
 +
 +# ==================== asn (match, rev 1) ====================
-+# Same out-of-bounds shape as geoip but XT_ASN_MAX = 15. sizeof == 184.
++# Same out-of-bounds shape as geoip but XT_ASN_MAX = 15; clamped for the same
++# reason. sizeof == 184.
 +xt_asn_match_info {
 +	asn	array[int32, XT_ASN_MAX]
 +	flags	flags[xt_asn_flags, int8]
-+	count	int8
++	count	int8[0:XT_ASN_MAX]
 +	mem	array[asn_number_group, XT_ASN_MAX]
 +}
 +
