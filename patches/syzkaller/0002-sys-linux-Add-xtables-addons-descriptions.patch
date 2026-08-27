@@ -1,0 +1,806 @@
+From 8ae4395a467b75483c117426612a31d8bd2d4e28 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Thu, 27 Aug 2026 09:40:36 +0000
+Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
+
+Seven dedicated IPT_SO_SET_REPLACE skeletons for the grafted matches and
+targets, instead of splicing them into the ipt_matches/ipt_targets unions of
+netfilter_ipv4.txt.
+
+The generic ipt_replace_t template cannot load a table at all: it points every
+hook_entry[] and underflow[] at offset 0, while translate_table() runs
+xt_check_table_hooks() first, and that requires both arrays to be strictly
+increasing across the valid hooks. Each skeleton here is a k+1 entry table for
+k valid hooks -- the addon rule at offset 0, then one unconditional STANDARD
+ACCEPT entry per hook -- with num_counters equal to the initial table's entry
+count, as xt_replace_table() demands. The rule is reachable from the first hook
+only, so e->comefrom stays inside every extension's .hooks mask.
+
+ipt_ip is a wildcard. ip_packet_match() compares addresses, masks and the
+interface name, and the upstream ipt_ip fills all of them from random pools, so
+a generated rule matched essentially no packet.
+
+ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
+(it triggers a real sysrq action in the guest).
+---
+ sys/linux/netfilter_xt_addons.txt       | 689 ++++++++++++++++++++++++
+ sys/linux/netfilter_xt_addons.txt.const |  74 +++
+ 2 files changed, 763 insertions(+)
+ create mode 100644 sys/linux/netfilter_xt_addons.txt
+ create mode 100644 sys/linux/netfilter_xt_addons.txt.const
+
+diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
+new file mode 100644
+index 0000000..da6254e
+--- /dev/null
++++ b/sys/linux/netfilter_xt_addons.txt
+@@ -0,0 +1,689 @@
++# Copyright 2026 alt-syz-box authors. All rights reserved.
++# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
++#
++# syzkaller descriptions for the out-of-tree xtables-addons matches and targets
++# (package kernel-modules-xtables-addons-6.12), grafted into
++# net/netfilter/xtables-addons/ and built into the kernel (=y).
++#
++# WHY THIS FILE DOES NOT REUSE ipt_replace FROM netfilter_ipv4.txt
++# ----------------------------------------------------------------
++# The generic ipt_replace_t template points *every* hook_entry[] and *every*
++# underflow[] at offset 0. translate_table() calls xt_check_table_hooks()
++# before it ever gets to find_check_entry(), and that function requires the
++# hook_entry and underflow arrays to be STRICTLY INCREASING across the valid
++# hooks of the table:
++#
++#	if (max_uflow == info->underflow[i]) { err = "duplicate underflow"; goto error; }
++#	if (max_entry == info->hook_entry[i]) { err = "duplicate entry";    goto error; }
++#
++# Every in-kernel table has at least two valid hooks, so an all-zero hook array
++# is rejected with -EINVAL before a single checkentry runs. That is why the
++# grafted modules show only the coverage of their pernet_operations: no
++# *_mt_check / *_tg_check is ever reached, whatever the descriptions of the
++# match payloads look like.
++#
++# Two more constraints have to be honoured at the same time:
++#
++#  * xt_replace_table() compares num_counters against the *currently installed*
++#    table's entry count ("if (num_counters != private->number) -EAGAIN").
++#    ipt_alloc_initial_table() builds hweight32(valid_hooks) + 1 entries, so
++#    num_counters -- and, to stay idempotent across repeated calls,
++#    num_entries -- must be exactly that.
++#
++#  * check_entry_size_and_hooks() runs check_underflow() on whatever entry sits
++#    at underflow[h]: it must be unconditional (which means *zero* matches,
++#    target_offset == sizeof(struct ipt_entry)) with a STANDARD ACCEPT/DROP
++#    verdict. So the entry an underflow points at can never carry an addon.
++#
++# THE LAYOUT USED HERE
++# --------------------
++# For a table with k valid hooks h0 < h1 < ... < h(k-1), exactly k+1 entries:
++#
++#	offset 0		the addon rule			hook_entry[h0]
++#	offset of p1		unconditional STANDARD ACCEPT	underflow[h0], hook_entry[h1]
++#	offset of p2		unconditional STANDARD ACCEPT	underflow[h1], hook_entry[h2]
++#	...
++#	offset of pk		unconditional STANDARD ACCEPT	underflow[h(k-1)]
++#
++# Both arrays are then strictly increasing, every underflow lands on a policy
++# entry, and the entry count matches the initial table. The offsets are taken
++# with offsetof[entries:pN], which resolves to the offset of pN inside the
++# entries blob -- exactly what hook_entry/underflow are relative to.
++#
++# A useful side effect: the rule is reachable from h0 only, so
++# e->comefrom == 1 << h0 and every .hooks restriction is satisfied.
++# h0 is LOCAL_IN for filter/security and PRE_ROUTING for nat/mangle, which are
++# also the hooks a packet injected by syz_emit_ethernet traverses.
++#
++# valid_hooks itself cannot be narrowed to dodge a .hooks restriction:
++# __do_replace() compares it for equality with the registered table.
++# ipt_ip.proto is pinned per skeleton and IPT_INV_PROTO is excluded from
++# invflags, so the .proto-restricted extensions (TARPIT/DELUDE/lscan need TCP,
++# ECHO/DHCPMAC need UDP) are reachable too.
++#
++# Kernel entry points reached:
++#   *_mt_check / *_tg_check   (checkentry, from IPT_SO_SET_REPLACE)
++#   *_mt / *_tg               (packet path, from syz_emit_ethernet)
++#   procfs / ACCOUNT sockopts (see dev_xt_addons.txt)
++#
++# Note: ipp2p is intentionally absent -- ALT p11 does not ship xt_ipp2p.c, so
++# xt_find_match("ipp2p") fails and takes the whole blob down with it.
++
++include <linux/socket.h>
++include <uapi/linux/netfilter.h>
++include <uapi/linux/netfilter/x_tables.h>
++include <uapi/linux/netfilter_ipv4/ip_tables.h>
++include <uapi/linux/netfilter/xt_addons_compat.h>
++include <linux/netfilter/xt_CHAOS.h>
++include <linux/netfilter/xt_DHCPMAC.h>
++include <linux/netfilter/xt_DNETMAP.h>
++include <linux/netfilter/xt_IPMARK.h>
++include <linux/netfilter/xt_LOGMARK.h>
++include <linux/netfilter/xt_PROTO.h>
++include <linux/netfilter/xt_TARPIT.h>
++include <linux/netfilter/xt_condition.h>
++include <linux/netfilter/xt_fuzzy.h>
++include <linux/netfilter/xt_geoip.h>
++include <linux/netfilter/xt_asn.h>
++include <linux/netfilter/xt_iface.h>
++include <linux/netfilter/xt_ipv4options.h>
++include <linux/netfilter/xt_length2.h>
++include <linux/netfilter/xt_lscan.h>
++include <linux/netfilter/xt_psd.h>
++include <linux/netfilter/xt_quota2.h>
++include <linux/netfilter/xt_pknock.h>
++
++# Self-contained copies of the tables' valid_hooks masks.
++define XA_FILTER_VALID_HOOKS	(1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT)
++define XA_NAT_VALID_HOOKS	(1 << NF_INET_PRE_ROUTING) | (1 << NF_INET_POST_ROUTING) | (1 << NF_INET_LOCAL_OUT) | (1 << NF_INET_LOCAL_IN)
++define XA_MANGLE_VALID_HOOKS	(1 << NF_INET_PRE_ROUTING) | (1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT) | (1 << NF_INET_POST_ROUTING)
++define XA_SECURITY_VALID_HOOKS	(1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT)
++
++# ==================== SYSCALLS ====================
++
++setsockopt$IPT_SO_SET_REPLACE_XA_FILTER(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_filter], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_XA_FILTER_TCP(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_filter_tcp], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_XA_FILTER_UDP(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_filter_udp], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_XA_MANGLE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_mangle], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_XA_MANGLE_UDP(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_mangle_udp], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_XA_NAT(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_nat], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_XA_SECURITY(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_security], len len[val])
++
++# ==================== TABLE SKELETONS ====================
++# k valid hooks -> k+1 entries: the addon rule, then one policy entry per hook.
++# hook_entry[h0] = 0 and hook_entry[h(i)] = offsetof(p(i)); underflow[h(i)] =
++# offsetof(p(i+1)). Both arrays are strictly increasing, as
++# xt_check_table_hooks() demands, and num_entries == num_counters ==
++# hweight32(valid_hooks) + 1 matches ipt_alloc_initial_table(), as
++# xt_replace_table() demands.
++
++ipt_xa_replace_filter {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in			const[0, int32]
++	hook_forward			offsetof[entries:p1, int32]
++	hook_local_out			offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing	ipt_unused
++	underflow_local_in	offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_xa_entries_filter
++}
++
++ipt_xa_entries_filter {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_matches, xa_filter_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++# filter with ipt_ip.proto pinned to TCP: TARPIT/DELUDE/lscan declare .proto.
++ipt_xa_replace_filter_tcp {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in			const[0, int32]
++	hook_forward			offsetof[entries:p1, int32]
++	hook_local_out			offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing	ipt_unused
++	underflow_local_in	offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_xa_entries_filter_tcp
++}
++
++ipt_xa_entries_filter_tcp {
++	rule	ipt_xa_entry[ipt_xa_proto_tcp, xa_matches_tcp, xa_filter_tcp_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++# filter with ipt_ip.proto pinned to UDP: ECHO and the dhcpmac match.
++ipt_xa_replace_filter_udp {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in			const[0, int32]
++	hook_forward			offsetof[entries:p1, int32]
++	hook_local_out			offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing	ipt_unused
++	underflow_local_in	offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_xa_entries_filter_udp
++}
++
++ipt_xa_entries_filter_udp {
++	rule	ipt_xa_entry[ipt_xa_proto_udp, xa_matches_udp, xa_filter_udp_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_xa_replace_mangle {
++	name			string["mangle", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_MANGLE_VALID_HOOKS, int32]
++	num_entries		const[6, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		const[0, int32]
++	hook_local_in			offsetof[entries:p1, int32]
++	hook_forward			offsetof[entries:p2, int32]
++	hook_local_out			offsetof[entries:p3, int32]
++	hook_post_routing		offsetof[entries:p4, int32]
++	underflow_pre_routing	offsetof[entries:p1, int32]
++	underflow_local_in	offsetof[entries:p2, int32]
++	underflow_forward		offsetof[entries:p3, int32]
++	underflow_local_out	offsetof[entries:p4, int32]
++	underflow_post_routing	offsetof[entries:p5, int32]
++	num_counters		const[6, int32]
++	counters		ptr[out, array[xt_counters, 6]]
++	entries			ipt_xa_entries_mangle
++}
++
++ipt_xa_entries_mangle {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_matches, xa_mangle_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++	p4	ipt_entry_underflow
++	p5	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_xa_replace_mangle_udp {
++	name			string["mangle", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_MANGLE_VALID_HOOKS, int32]
++	num_entries		const[6, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		const[0, int32]
++	hook_local_in			offsetof[entries:p1, int32]
++	hook_forward			offsetof[entries:p2, int32]
++	hook_local_out			offsetof[entries:p3, int32]
++	hook_post_routing		offsetof[entries:p4, int32]
++	underflow_pre_routing	offsetof[entries:p1, int32]
++	underflow_local_in	offsetof[entries:p2, int32]
++	underflow_forward		offsetof[entries:p3, int32]
++	underflow_local_out	offsetof[entries:p4, int32]
++	underflow_post_routing	offsetof[entries:p5, int32]
++	num_counters		const[6, int32]
++	counters		ptr[out, array[xt_counters, 6]]
++	entries			ipt_xa_entries_mangle_udp
++}
++
++ipt_xa_entries_mangle_udp {
++	rule	ipt_xa_entry[ipt_xa_proto_udp, xa_matches_udp, xa_mangle_udp_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++	p4	ipt_entry_underflow
++	p5	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_xa_replace_nat {
++	name			string["nat", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_NAT_VALID_HOOKS, int32]
++	num_entries		const[5, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		const[0, int32]
++	hook_local_in			offsetof[entries:p1, int32]
++	hook_forward			ipt_unused
++	hook_local_out			offsetof[entries:p2, int32]
++	hook_post_routing		offsetof[entries:p3, int32]
++	underflow_pre_routing	offsetof[entries:p1, int32]
++	underflow_local_in	offsetof[entries:p2, int32]
++	underflow_forward		ipt_unused
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	offsetof[entries:p4, int32]
++	num_counters		const[5, int32]
++	counters		ptr[out, array[xt_counters, 5]]
++	entries			ipt_xa_entries_nat
++}
++
++ipt_xa_entries_nat {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_matches, xa_nat_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++	p4	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_xa_replace_security {
++	name			string["security", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_SECURITY_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in			const[0, int32]
++	hook_forward			offsetof[entries:p1, int32]
++	hook_local_out			offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing	ipt_unused
++	underflow_local_in	offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_xa_entries_security
++}
++
++ipt_xa_entries_security {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_matches, xa_targets_any]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++# ==================== ENTRY TEMPLATE ====================
++
++type ipt_xa_entry[PROTO, MATCHES, TARGETS] {
++	matches	ipt_xa_entry_matches[PROTO, MATCHES]
++	target	TARGETS
++} [packed, align[PTR_SIZE]]
++
++type ipt_xa_entry_matches[PROTO, MATCHES] {
++	ip		ipt_xa_ip[PROTO]
++	nfcache		const[0, int32]
++	target_offset	len[parent, int16]
++	next_offset	len[ipt_xa_entry, int16]
++	comefrom	const[0, int32]
++	counters	xt_counters
++	matches		array[MATCHES, 0:2]
++} [align[PTR_SIZE]]
++
++# Wildcard ipt_ip: all selectors zeroed, only ipt_ip.proto is used.
++#
++# This is what decides whether the rule ever fires on a packet.
++# ip_packet_match() requires
++#	(saddr & smsk) == src, (daddr & dmsk) == dst
++#	ifname_compare_aligned(indev, iniface, iniface_mask) == 0
++# and syzkaller's ipv4_addr / ipv4_addr_mask / devname pick random values out
++# of their pools, so a randomly generated selector matches essentially no
++# packet: every extension without a .checkentry stayed at exactly 0% while
++# every extension with one got coverage. Zeroing the selectors is what
++# "iptables -I INPUT -j TARGET" produces and makes the rule match everything
++# that reaches its hook.
++#
++# invflags stays 0 as well: IPT_INV_SRCIP/DSTIP/VIA_* would invert these
++# comparisons and put us back to never matching, and IPT_INV_PROTO would break
++# the .proto-restricted extensions. IPT_F_FRAG would demand fragments.
++type ipt_xa_ip[PROTO] {
++	src		const[0, int32be]
++	dst		const[0, int32be]
++	smsk		const[0, int32be]
++	dmsk		const[0, int32be]
++	iniface		array[const[0, int8], IFNAMSIZ]
++	outiface	array[const[0, int8], IFNAMSIZ]
++	iniface_mask	array[const[0, int8], IFNAMSIZ]
++	outiface_mask	array[const[0, int8], IFNAMSIZ]
++	proto		PROTO
++	flags		const[0, int8]
++	invflags	const[0, int8]
++}
++
++type ipt_xa_proto_any	flags[ipv4_types, int16]
++type ipt_xa_proto_tcp	const[IPPROTO_TCP, int16]
++type ipt_xa_proto_udp	const[IPPROTO_UDP, int16]
++
++
++# ==================== SHARED NAME POOL ====================
++# Fixed name pool for the extensions that create a named procfs entry. The same
++# pool is used by dev_xt_addons.txt, so the procfs write() descriptions target
++# exactly the names the fuzzer registers here. No empty string: these feed
++# fixed-length string[] buffers and "" would collapse the buffer to length 1.
++xt_addon_names = "syz0", "syz1", "syz2"
++
++# ==================== MATCH UNIONS ====================
++# Everything here registers without .table, .hooks or .proto, so it is legal in
++# any of the skeletons above.
++xa_matches [
++	condition	xt_entry_match_t["condition", xt_condition_mtinfo, 1]
++	quota2		xt_entry_match_t["quota2", xt_quota_mtinfo2, 3]
++	fuzzy		xt_entry_match_t["fuzzy", xt_fuzzy_mtinfo, 1]
++	iface		xt_entry_match_t["iface", xt_iface_mtinfo, 0]
++	length2		xt_entry_match_t["length2", xt_length_mtinfo2, 2]
++	psd		xt_entry_match_t["psd", xt_psd_info, 1]
++	geoip		xt_entry_match_t["geoip", xt_geoip_match_info, 2]
++	asn		xt_entry_match_t["asn", xt_asn_match_info, 1]
++	ipv4options	xt_entry_match_t["ipv4options", xt_ipv4options_mtinfo1, 1]
++	pknock		xt_entry_match_t["pknock", xt_pknock_mtinfo, 1]
++# so (ipt-so) rides along here as well as in its own skeletons in
++# netfilter_ipt_so.txt. so_mt_reg declares no .table/.hooks/.proto, so it is
++# legal in every skeleton above, and these seven syscalls already have corpus
++# entries -- reaching so_mt() only through the three IPT_SO_SET_REPLACE_SO_*
++# variants made it strictly harder to hit than the nine matches next to it,
++# which is why xt_so.c stayed at 0% while xt_ipv4options.c (also without a
++# .checkentry) reached 34%.
++	so		xt_entry_match_t["so", so_info, 0]
++] [varlen]
++
++# lscan registers with .proto = IPPROTO_TCP.
++xa_matches_tcp [
++	common	xa_matches
++	lscan	xt_entry_match_t["lscan", xt_lscan_mtinfo, 0]
++] [varlen]
++
++# The dhcpmac *match* (as opposed to the DHCPMAC target) registers with
++# .proto = IPPROTO_UDP and no .table.
++xa_matches_udp [
++	common	xa_matches
++	dhcpmac	xt_entry_match_t["dhcpmac", dhcpmac_info, 0]
++] [varlen]
++
++# ==================== TARGET UNIONS ====================
++# LOGMARK registers with neither .table nor .hooks nor .proto.
++xa_targets_any [
++	LOGMARK	xt_target_t["LOGMARK", xt_logmark_tginfo, 0]
++] [varlen]
++
++xa_filter_targets [
++	common	xa_targets_any
++	CHAOS	xt_target_t["CHAOS", xt_chaos_tginfo, 0]
++] [varlen]
++
++# CHAOS .hooks is IN|FWD|OUT, which is a superset of this skeleton's IN|FWD.
++xa_filter_tcp_targets [
++	common	xa_targets_any
++	CHAOS	xt_target_t["CHAOS", xt_chaos_tginfo, 0]
++	TARPIT	xt_target_t["TARPIT", xt_tarpit_tginfo, 0]
++	DELUDE	xt_target_t["DELUDE", void, 0]
++] [varlen]
++
++xa_filter_udp_targets [
++	common	xa_targets_any
++	ECHO	xt_target_t["ECHO", void, 0]
++] [varlen]
++
++xa_mangle_targets [
++	common	xa_targets_any
++	IPMARK	xt_target_t["IPMARK", xt_ipmark_tginfo, 1]
++	PROTO	xt_target_t["PROTO", xt_PROTO_info, 0]
++] [varlen]
++
++xa_mangle_udp_targets [
++	common	xa_mangle_targets
++	DHCPMAC	xt_target_t["DHCPMAC", dhcpmac_info, 0]
++] [varlen]
++
++xa_nat_targets [
++	common	xa_targets_any
++	DNETMAP	xt_target_t["DNETMAP", xt_DNETMAP_tginfo, 0]
++	ACCOUNT	xt_target_t["ACCOUNT", ipt_acc_info, 1]
++] [varlen]
++
++# ==================== condition (match, rev 1) ====================
++# name goes through xt_check_proc_name(): no '.', '..', '/', no control chars,
++# NUL-terminated. condvar is kernel-internal; keep it zero.
++# Layout: char name[31]; __u8 invert; void *condvar __attribute__((aligned(8)));
++# -> sizeof == 40.
++xt_condition_mtinfo {
++	name	string[xt_addon_names, CONDITION_NAME_LEN]
++	invert	bool8
++	condvar	const[0, intptr]
++}
++
++# ==================== quota2 (match, rev 3) ====================
++# char name[15]; u8 flags; aligned_u64 quota; struct * master; -> sizeof == 32.
++# A non-empty name makes q2_get_counter() look the counter up in the per-netns
++# list and create it there, which is what exposes /proc/net/xt_quota/<name> to
++# dev_xt_addons.txt. An empty name takes the anonymous path instead.
++xt_quota_mtinfo2 {
++	name	string[xt_addon_names, 15]
++	flags	flags[xt_quota2_flags, int8]
++	quota	int64
++	master	const[0, intptr]
++}
++
++xt_quota2_flags = XT_QUOTA_INVERT, XT_QUOTA_GROW, XT_QUOTA_PACKET, XT_QUOTA_NO_CHANGE
++
++# ==================== fuzzy (match, rev 1) ====================
++# fuzzy_mt_check enforces FUZZY_MIN_RATE <= minimum_rate,
++# maximum_rate <= FUZZY_MAX_RATE, minimum_rate < maximum_rate. Bias toward valid
++# so the packet path (fuzzy_mt) is reached, but leave slack for the -EDOM path.
++xt_fuzzy_mtinfo {
++	minimum_rate	int32[3:10000000]
++	maximum_rate	int32[3:10000000]
++	packets_total	int32
++	bytes_total	int32
++	previous_time	int32
++	present_time	int32
++	mean_rate	int32
++	acceptance_rate	int8
++}
++
++# ==================== iface (match, rev 0) ====================
++xt_iface_mtinfo {
++	ifname		devname
++	flags		flags[xt_iface_flags, int16]
++	invflags	flags[xt_iface_flags, int16]
++}
++
++xt_iface_flags = XT_IFACE_UP, XT_IFACE_BROADCAST, XT_IFACE_LOOPBACK, XT_IFACE_POINTOPOINT, XT_IFACE_RUNNING, XT_IFACE_NOARP, XT_IFACE_PROMISC, XT_IFACE_MULTICAST, XT_IFACE_DYNAMIC, XT_IFACE_LOWER_UP, XT_IFACE_DORMANT, XT_IFACE_DEV_IN, XT_IFACE_DEV_OUT
++
++# ==================== length2 (match, rev 2) ====================
++xt_length_mtinfo2 {
++	min	int32
++	max	int32
++	flags	flags[xt_length2_flags, int16]
++}
++
++xt_length2_flags = XT_LENGTH_INVERT, XT_LENGTH_LAYER3, XT_LENGTH_LAYER4, XT_LENGTH_LAYER5, XT_LENGTH_LAYER7
++
++# ==================== psd (match, rev 1) ====================
++# psd_mt_check: weight_threshold != 0, (lo|hi) != 0, all <= PSD_MAX_RATE (10000).
++xt_psd_info {
++	weight_threshold	int32[1:10000]
++	delay_threshold		int32[0:10000]
++	lo_ports_weight		int16[0:10000]
++	hi_ports_weight		int16[0:10000]
++}
++
++# ==================== geoip (match, rev 2) ====================
++# NOTE: xt_geoip_mt_checkentry() loops i < info->count with count being __u8
++# while cc[] and mem[] hold only XT_GEOIP_MAX entries, so count > 31 is an
++# out-of-bounds write past the matchinfo blob. count is left at the full __u8
++# range on purpose so the fuzzer can reach it under KASAN/UBSAN.
++# sizeof == 312.
++xt_geoip_match_info {
++	flags	flags[xt_geoip_flags, int8]
++	count	int8
++	cc	array[int16, XT_GEOIP_MAX]
++	mem	array[geoip_country_group, XT_GEOIP_MAX]
++}
++
++xt_geoip_flags = XT_GEOIP_SRC, XT_GEOIP_DST, XT_GEOIP_INV
++
++# union geoip_country_group holds a user pointer to a geoip_country_user, which
++# geoip_add_node copies with copy_from_user. Point it at a real, well-formed
++# table so checkentry proceeds past the copy and exercises geoip_add_node fully.
++geoip_country_group {
++	user	ptr64[in, geoip_country_user]
++}
++
++geoip_country_user {
++	subnets	ptr64[in, array[geoip_subnet4, 0:8]]
++	count	int32[0:8]
++	cc	int16
++}
++
++geoip_subnet4 {
++	begin	int32
++	end	int32
++}
++
++# ==================== asn (match, rev 1) ====================
++# Same out-of-bounds shape as geoip but XT_ASN_MAX = 15. sizeof == 184.
++xt_asn_match_info {
++	asn	array[int32, XT_ASN_MAX]
++	flags	flags[xt_asn_flags, int8]
++	count	int8
++	mem	array[asn_number_group, XT_ASN_MAX]
++}
++
++xt_asn_flags = XT_ASN_SRC, XT_ASN_DST, XT_ASN_INV
++
++asn_number_group {
++	user	ptr64[in, asn_number_user]
++}
++
++asn_number_user {
++	subnets	ptr64[in, array[geoip_subnet4, 0:8]]
++	count	int32[0:8]
++	asn	int32
++}
++
++# ==================== ipv4options (match, rev 1) ====================
++xt_ipv4options_mtinfo1 {
++	map	int32
++	invert	int32
++	flags	flags[xt_v4opts_flags, int8]
++}
++
++xt_v4opts_flags = XT_V4OPTS_ALL, XT_V4OPTS_ANY
++
++# ==================== lscan (match, rev 0, .proto = TCP) ====================
++xt_lscan_mtinfo {
++	match_fl1	int8
++	match_fl2	int8
++	match_fl3	int8
++	match_fl4	int8
++}
++
++# ==================== pknock (match, rev 1) ====================
++# rule_name is taken from the shared pool so that /proc/net/xt_pknock/<name> is
++# predictable for dev_xt_addons.txt; all pool entries are 4 characters long, so
++# rule_name_len is a constant. pknock_mt_check() rejects rule_name_len == 0 and
++# requires XT_PKNOCK_NAME in option. sizeof == 148.
++xt_pknock_mtinfo {
++	rule_name	string[xt_addon_names, 32]
++	rule_name_len	const[4, int32]
++	open_secret	string[xt_addon_secrets, 32]
++	open_secret_len	const[4, int32]
++	close_secret	string[xt_addon_secrets, 32]
++	close_secret_len	const[4, int32]
++	option		flags[xt_pknock_opts, int8]
++	ports_count	int8[0:15]
++	port		array[sock_port, XT_PKNOCK_MAX_PORTS]
++	max_time	int32
++	autoclose_time	int32
++}
++
++xt_addon_secrets = "sec0", "sec1"
++xt_pknock_opts = XT_PKNOCK_KNOCKPORT, XT_PKNOCK_TIME, XT_PKNOCK_NAME, XT_PKNOCK_STRICT, XT_PKNOCK_CHECKIP, XT_PKNOCK_OPENSECRET, XT_PKNOCK_CLOSESECRET, XT_PKNOCK_AUTOCLOSE
++
++# ==================== TARPIT / CHAOS (targets) ====================
++# variant is an enum, not a bitmask: 0 TARPIT, 1 HONEYPOT, 2 RESET. Modelling it
++# as flags[] also generates 3, which tarpit_generic() rejects.
++xt_tarpit_tginfo {
++	variant	int8[0:2]
++}
++
++# chaos_tg_check() returns -ENOENT for the TARPIT/DELUDE variants unless those
++# modules are present; both are built =y here.
++# Likewise an enum: 0 NORMAL, 1 TARPIT, 2 DELUDE.
++xt_chaos_tginfo {
++	variant	int8[0:2]
++}
++
++# ==================== IPMARK (target, rev 1) ====================
++# NOTE: ipmark_tg4() does "newmark >>= info->shift" on a __u32 with no bound
++# check, so any shift >= 32 is undefined behaviour. shift is left at the full
++# __u8 range on purpose.
++xt_ipmark_tginfo {
++	andmask		int32
++	ormask		int32
++	selector	flags[xt_ipmark_sel, int8]
++	shift		int8
++}
++
++xt_ipmark_sel = XT_IPMARK_SRC, XT_IPMARK_DST
++
++# ==================== LOGMARK (target, rev 0) ====================
++xt_logmark_tginfo {
++	prefix	array[int8, 14]
++	level	int8
++}
++
++# ==================== PROTO (target, rev 0) ====================
++xt_PROTO_info {
++	mode	flags[xt_proto_mode, int8]
++	proto	int8
++}
++
++xt_proto_mode = XT_PROTO_SET, XT_PROTO_STOP_AT_FRAG, XT_PROTO_STOP_AT_AUTH
++
++# ==================== DHCPMAC (target rev 0 / match rev 0) ====================
++dhcpmac_info {
++	addr	mac_addr
++	mask	int8
++	invert	int8
++}
++
++# ==================== DNETMAP (target, rev 0) ====================
++# prefix is a struct nf_nat_range (40 bytes) followed by __u8 flags and
++# __s32 ttl -> sizeof == 48. If the packaged xtables-addons switched to
++# nf_nat_range2, add base_proto (int16) at the end of nf_nat_range_dnetmap.
++xt_DNETMAP_tginfo {
++	prefix	nf_nat_range_dnetmap
++	flags	flags[xt_dnetmap_flags, int8]
++	ttl	int32
++}
++
++xt_dnetmap_flags = XT_DNETMAP_TTL, XT_DNETMAP_REUSE, XT_DNETMAP_PREFIX, XT_DNETMAP_STATIC, XT_DNETMAP_PERSISTENT, XT_DNETMAP_FULL
++
++nf_nat_range_dnetmap {
++	flags		int32
++	min_addr	nf_inet_addr
++	max_addr	nf_inet_addr
++	min_proto	nf_conntrack_man_proto
++	max_proto	nf_conntrack_man_proto
++}
++
++# ==================== ACCOUNT (target, rev 1) ====================
++# ipt_acc_info: net_ip/net_mask big-endian, table_name (proc name), table_nr set
++# by the kernel. sizeof == 44.
++ipt_acc_info {
++	net_ip		ipv4_addr
++	net_mask	ipv4_addr_mask
++	table_name	string[xt_addon_names, ACCOUNT_TABLE_NAME_LEN]
++	table_nr	int32
++}
+diff --git a/sys/linux/netfilter_xt_addons.txt.const b/sys/linux/netfilter_xt_addons.txt.const
+new file mode 100644
+index 0000000..9b638e7
+--- /dev/null
++++ b/sys/linux/netfilter_xt_addons.txt.const
+@@ -0,0 +1,74 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++ACCOUNT_TABLE_NAME_LEN = amd64:32
++CONDITION_NAME_LEN = amd64:31
++IFNAMSIZ = amd64:16
++IPPROTO_TCP = amd64:6
++IPPROTO_UDP = amd64:17
++IPT_SO_SET_REPLACE = amd64:64
++SOL_IP = amd64:0
++XA_FILTER_VALID_HOOKS = amd64:14
++XA_MANGLE_VALID_HOOKS = amd64:31
++XA_NAT_VALID_HOOKS = amd64:27
++XA_SECURITY_VALID_HOOKS = amd64:14
++XTCHAOS_DELUDE = amd64:2
++XTCHAOS_NORMAL = amd64:0
++XTCHAOS_TARPIT = amd64:1
++XTTARPIT_HONEYPOT = amd64:1
++XTTARPIT_RESET = amd64:2
++XTTARPIT_TARPIT = amd64:0
++XT_ASN_DST = amd64:2
++XT_ASN_INV = amd64:4
++XT_ASN_MAX = amd64:15
++XT_ASN_SRC = amd64:1
++XT_DNETMAP_FULL = amd64:32
++XT_DNETMAP_PERSISTENT = amd64:16
++XT_DNETMAP_PREFIX = amd64:4
++XT_DNETMAP_REUSE = amd64:2
++XT_DNETMAP_STATIC = amd64:8
++XT_DNETMAP_TTL = amd64:1
++XT_EXTENSION_MAXNAMELEN = amd64:29
++XT_GEOIP_DST = amd64:2
++XT_GEOIP_INV = amd64:4
++XT_GEOIP_MAX = amd64:31
++XT_GEOIP_SRC = amd64:1
++XT_IFACE_BROADCAST = amd64:2
++XT_IFACE_DEV_IN = amd64:2048
++XT_IFACE_DEV_OUT = amd64:4096
++XT_IFACE_DORMANT = amd64:1024
++XT_IFACE_DYNAMIC = amd64:256
++XT_IFACE_LOOPBACK = amd64:4
++XT_IFACE_LOWER_UP = amd64:512
++XT_IFACE_MULTICAST = amd64:128
++XT_IFACE_NOARP = amd64:32
++XT_IFACE_POINTOPOINT = amd64:8
++XT_IFACE_PROMISC = amd64:64
++XT_IFACE_RUNNING = amd64:16
++XT_IFACE_UP = amd64:1
++XT_IPMARK_DST = amd64:1
++XT_IPMARK_SRC = amd64:0
++XT_LENGTH_INVERT = amd64:1
++XT_LENGTH_LAYER3 = amd64:2
++XT_LENGTH_LAYER4 = amd64:4
++XT_LENGTH_LAYER5 = amd64:8
++XT_LENGTH_LAYER7 = amd64:16
++XT_PKNOCK_AUTOCLOSE = amd64:128
++XT_PKNOCK_CHECKIP = amd64:16
++XT_PKNOCK_CLOSESECRET = amd64:64
++XT_PKNOCK_KNOCKPORT = amd64:1
++XT_PKNOCK_MAX_PORTS = amd64:15
++XT_PKNOCK_NAME = amd64:4
++XT_PKNOCK_OPENSECRET = amd64:32
++XT_PKNOCK_STRICT = amd64:8
++XT_PKNOCK_TIME = amd64:2
++XT_PROTO_SET = amd64:0
++XT_PROTO_STOP_AT_AUTH = amd64:2
++XT_PROTO_STOP_AT_FRAG = amd64:1
++XT_QUOTA_GROW = amd64:2
++XT_QUOTA_INVERT = amd64:1
++XT_QUOTA_NO_CHANGE = amd64:8
++XT_QUOTA_PACKET = amd64:4
++XT_TABLE_MAXNAMELEN = amd64:32
++XT_V4OPTS_ALL = amd64:1
++XT_V4OPTS_ANY = amd64:2
++__NR_setsockopt = amd64:54
