@@ -12,10 +12,10 @@
 export TERM="xterm-256color"
 
 # General kernel local verion
-export KERNEL_LOCALVERSION="alt-syz-box"
+export KERNEL_LOCALVERSION="alt-syz-box-netfilter-addons"
 
 # Select which syzkaller config template to use from 'config/syzkaller/'
-export SYZ_CONFIG_TEMPLATE="generic"
+export SYZ_CONFIG_TEMPLATE="netfilter-addons"
 
 # Space-separated list of sys/linux/*.txt files for which to regenerate
 # .const via syz-extract during the syzkaller build
@@ -32,7 +32,7 @@ export CONTAINER_REPO_DIR="/home/user/alt-syz-box"
 # Kernel git repository URL and tag/branch
 # Default is ALT Linux kernel, but you can change it to mainline or any other kernel
 export KERNEL_GIT_URL="git://git.altlinux.org/people/kernelbot/packages/kernel-image.git"
-export KERNEL_GIT_TAG="kernel-image-6.12-6.12.56-alt1"
+export KERNEL_GIT_TAG="kernel-image-6.12-6.12.105-alt0.c10f.2"
 
 # To use the LVC fork version, uncomment these lines:
 # export KERNEL_GIT_URL="https://git.linuxtesting.ru/pub/scm/linux/kernel/git/lvc/linux-stable.git"
