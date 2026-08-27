@@ -1,6 +1,6 @@
-From 2817bc2e2fed456ac7a34c886d69e1edfc11ec85 Mon Sep 17 00:00:00 2001
+From bc0543697d7c8c01d008b75ab4845efb67e98ce7 Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
-Date: Thu, 27 Aug 2026 09:40:37 +0000
+Date: Thu, 27 Aug 2026 13:50:04 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
 
 Seven dedicated IPT_SO_SET_REPLACE skeletons for the grafted matches and
@@ -23,18 +23,18 @@ a generated rule matched essentially no packet.
 ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 (it triggers a real sysrq action in the guest).
 ---
- sys/linux/netfilter_xt_addons.txt       | 756 ++++++++++++++++++++++++
+ sys/linux/netfilter_xt_addons.txt       | 762 ++++++++++++++++++++++++
  sys/linux/netfilter_xt_addons.txt.const |  74 +++
- 2 files changed, 830 insertions(+)
+ 2 files changed, 836 insertions(+)
  create mode 100644 sys/linux/netfilter_xt_addons.txt
  create mode 100644 sys/linux/netfilter_xt_addons.txt.const
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..845a435
+index 0000000..ec3899b
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
-@@ -0,0 +1,756 @@
+@@ -0,0 +1,762 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -450,6 +450,12 @@ index 0000000..845a435
 +	geoip		xt_entry_match_t["geoip", xt_geoip_match_info, 2]
 +	asn		xt_entry_match_t["asn", xt_asn_match_info, 1]
 +	ipv4options	xt_entry_match_t["ipv4options", xt_ipv4options_mtinfo1, 1]
++# pknock is here as well as in its own skeleton further down. Being the only
++# match in a dedicated syscall means it is always present when that syscall
++# runs, but never combined with anything else; the shared pool gives it the
++# combinations. It was kept out of here only while its module init was failing,
++# because an unregistered match rejects the whole table.
++	pknock		xt_entry_match_t["pknock", xt_pknock_mtinfo, 1]
 +# so (ipt-so) rides along here as well as in its own skeletons in
 +# netfilter_ipt_so.txt. so_mt_reg declares no .table/.hooks/.proto, so it is
 +# legal in every skeleton above, and these seven syscalls already have corpus
