@@ -82,6 +82,12 @@ else
     echo "No kernel patches found to apply."
 fi
 
+
+# 2b. Graft out-of-tree modules into the kernel source tree before defconfig
+echo "Grafting out-of-tree modules into kernel source tree..."
+"$CONTAINER_REPO_DIR/scripts/graft-oot-xtables-addons.sh"
+"$CONTAINER_REPO_DIR/scripts/graft-oot-ipt-so.sh"
+
 mkdir -p "$KERNEL_BUILD_DIR"
 
 # 3. Configure the kernel
@@ -152,6 +158,50 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
 # err    --set-str LSM "selinux"
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     --set-str LSM "landlock,lockdown,yama,loadpin,safesetid,smack,tomoyo,apparmor,ipe,bpf,altha,kiosk"
+
+# -- netfilter -------------------------------------
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e NF_TABLES -e NF_TABLES_INET \
+    -e IP_NF_IPTABLES -e IP_NF_FILTER -e IP_NF_MANGLE \
+    -e IP_NF_NAT -e IP_NF_SECURITY -e IP_NF_RAW \
+    -e IP6_NF_IPTABLES -e IP6_NF_FILTER -e IP6_NF_MANGLE \
+    -e IP6_NF_NAT -e IP6_NF_SECURITY -e IP6_NF_RAW \
+    -e NETFILTER_XTABLES -e NF_CONNTRACK -e NF_NAT \
+    -e NF_CONNTRACK_MARK -e NETFILTER_ADVANCED
+
+# -- xtables-addons (grafted into net/netfilter/xtables-addons/)
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e TEXTSEARCH -e TEXTSEARCH_KMP -e TEXTSEARCH_BM -e TEXTSEARCH_FSM \
+    -e NETFILTER_XT_MATCH_CONDITION \
+    -e NETFILTER_XT_MATCH_QUOTA2 \
+    -e NETFILTER_XT_MATCH_FUZZY \
+    -e NETFILTER_XT_MATCH_IFACE \
+    -e NETFILTER_XT_MATCH_LENGTH2 \
+    -e NETFILTER_XT_MATCH_IPP2P \
+    -e NETFILTER_XT_MATCH_PSD \
+    -e NETFILTER_XT_MATCH_GEOIP \
+    -e NETFILTER_XT_MATCH_ASN \
+    -e NETFILTER_XT_MATCH_IPV4OPTIONS \
+    -e NETFILTER_XT_MATCH_LSCAN \
+    -e NETFILTER_XT_MATCH_PKNOCK \
+    -e NETFILTER_XT_TARGET_TARPIT \
+    -e NETFILTER_XT_TARGET_CHAOS \
+    -e NETFILTER_XT_TARGET_DELUDE \
+    -e NETFILTER_XT_TARGET_ECHO \
+    -e NETFILTER_XT_TARGET_IPMARK \
+    -e NETFILTER_XT_TARGET_LOGMARK \
+    -e NETFILTER_XT_TARGET_PROTO \
+    -e NETFILTER_XT_TARGET_DHCPMAC \
+    -e NETFILTER_XT_TARGET_DNETMAP \
+    -e NETFILTER_XT_TARGET_ACCOUNT
+# Note: NETFILTER_XT_TARGET_SYSRQ intentionally omitted
+
+# -- ipt-so (grafted alongside xtables-addons) -----
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e NETLABEL \
+    -e CIPSO_IPV4 \
+    -e NETWORK_SECMARK \
+    -e NETFILTER_XT_MATCH_SO
 
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
