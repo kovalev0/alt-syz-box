@@ -1,0 +1,555 @@
+From 94c5956ec1392e818f1f001bbb91560e13be7dee Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Thu, 27 Aug 2026 09:40:36 +0000
+Subject: [PATCH 4/4] sys/linux: Add ipt-so descriptions
+
+The "so" match in filter, mangle and security, the two IPv4 security options it
+parses, and three senders on a SOCK_RAW/IPPROTO_RAW socket -- the route the
+in-guest unit test uses: out through LOCAL_OUT, back over loopback to
+PRE_ROUTING and LOCAL_IN.
+
+so_mt_reg has no .checkentry, so all 64 lines of xt_so.c are in the packet
+path. so_info is also listed in xa_matches, so this patch and the
+xtables-addons one must be applied together.
+
+  sendto$inet_hdrincl reuses ipv4_packet from vnet.txt.
+  sendto$inet_hdrincl_labeled always carries an IPOPT_SEC or IPOPT_CIPSO
+  option, bounded so two of them still fit the 4-bit ihl.
+  sendto$inet_hdrincl_plain pins ihl to 5 for the targets that reject packets
+  with options, and names its header syz_csum_ipv4_header so prog/checksum.go
+  computes real TCP and UDP checksums for it.
+
+The security options are not spliced into the ipv4_option union of vnet.txt:
+patching a shared upstream file made syz-sysgen fail the whole target with
+"unused struct" whenever that hunk did not land.
+---
+ sys/linux/netfilter_ipt_so.txt       | 480 +++++++++++++++++++++++++++
+ sys/linux/netfilter_ipt_so.txt.const |  32 ++
+ 2 files changed, 512 insertions(+)
+ create mode 100644 sys/linux/netfilter_ipt_so.txt
+ create mode 100644 sys/linux/netfilter_ipt_so.txt.const
+
+diff --git a/sys/linux/netfilter_ipt_so.txt b/sys/linux/netfilter_ipt_so.txt
+new file mode 100644
+index 0000000..8cc3295
+--- /dev/null
++++ b/sys/linux/netfilter_ipt_so.txt
+@@ -0,0 +1,480 @@
++# Copyright 2026 alt-syz-box authors. All rights reserved.
++# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
++#
++# syzkaller descriptions for ipt-so (xt_so.ko), the "so" iptables match that
++# selects packets by CIPSO / RFC 1108 (Astra Linux SE) IP security labels.
++# Package kernel-modules-ipt-so-6.12, upstream github.com/vt-alt/ipt-so.
++# Grafted into net/netfilter/xtables-addons/ and built =y.
++#
++# so_mt_reg has NO .checkentry, so *every* line of xt_so.c lives in the packet
++# path (so_mt -> parse_cipso / parse_rfc1108_astra / unpack_rfc1108_bits /
++# copy_msb0_bits / bitrev64). Installing a rule alone yields zero coverage; the
++# rule has to be installed AND a labelled packet has to traverse its hook.
++#
++# Two coverage channels:
++#   1) The match config blob (struct so_info) delivered via a dedicated
++#      IPT_SO_SET_REPLACE skeleton (see netfilter_xt_addons.txt for why the
++#      generic ipt_replace union does not work). so_mt_reg has no .table
++#      restriction, so filter/mangle/security are all valid; mangle also gives
++#      the PRE_ROUTING path, which sees packets that never become local.
++#   2) Labelled packets emitted via syz_emit_ethernet, exercising the parser.
++#      These are new structured IPv4 options spliced into the ipv4_option union
++#      in vnet.txt (see the companion patch hunk).
++#
++# IMPORTANT for channel 2: IPOPT_CIPSO packets are dropped by
++# ip_options_compile() -> cipso_v4_validate() long before netfilter unless a
++# CIPSO DOI is registered in the guest. Either register it at boot
++#     netlabelctl cipso add pass doi:1 tags:1
++#     netlabelctl unlbl setdef address:0.0.0.0/0 label:unlabelled
++# or let the fuzzer do it via sendmsg$NLBL_CIPSOV4_C_ADD from
++# socket_netlink_generic_netlabel.txt. IPOPT_SEC (Astra) needs neither -- the
++# receive path falls into the default branch of ip_options_compile() and just
++# skips the option.
++
++include <linux/socket.h>
++include <linux/bitops.h>
++include <uapi/linux/netfilter.h>
++include <uapi/linux/netfilter/x_tables.h>
++include <uapi/linux/netfilter_ipv4/ip_tables.h>
++include <uapi/linux/netfilter/xt_addons_compat.h>
++include <linux/netfilter/xt_so.h>
++include <asm/ioctls.h>
++include <uapi/linux/in.h>
++
++define SO_FILTER_VALID_HOOKS	(1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT)
++define SO_MANGLE_VALID_HOOKS	(1 << NF_INET_PRE_ROUTING) | (1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT) | (1 << NF_INET_POST_ROUTING)
++define SO_SECURITY_VALID_HOOKS	(1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT)
++
++# BITS_TO_LONGS(LEVELS_NUM) == BITS_TO_LONGS(257) == 5 on 64-bit.
++define XT_SO_LEVELMAP_LONGS	BITS_TO_LONGS(LEVELS_NUM)
++
++# ==================== SYSCALLS ====================
++
++setsockopt$IPT_SO_SET_REPLACE_SO_FILTER(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_so_replace_filter], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_SO_MANGLE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_so_replace_mangle], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_SO_SECURITY(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_so_replace_security], len len[val])
++
++# ==================== TABLE SKELETONS ====================
++# Same layout as netfilter_xt_addons.txt: k valid hooks -> k+1 entries, the
++# "so" rule first and one unconditional STANDARD ACCEPT policy entry per hook,
++# so hook_entry[] and underflow[] are strictly increasing (xt_check_table_hooks)
++# and num_entries == num_counters == hweight32(valid_hooks) + 1
++# (xt_replace_table). The rule is reachable from the table's first valid hook
++# only -- LOCAL_IN for filter/security, PRE_ROUTING for mangle -- which are the
++# hooks a packet injected by syz_emit_ethernet traverses.
++
++ipt_so_replace_filter {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[SO_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in		const[0, int32]
++	hook_forward		offsetof[entries:p1, int32]
++	hook_local_out		offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing		ipt_unused
++	underflow_local_in		offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out		offsetof[entries:p3, int32]
++	underflow_post_routing		ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_so_entries_filter
++}
++
++ipt_so_entries_filter {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_so_matches, xa_targets_any]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_so_replace_mangle {
++	name			string["mangle", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[SO_MANGLE_VALID_HOOKS, int32]
++	num_entries		const[6, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		const[0, int32]
++	hook_local_in		offsetof[entries:p1, int32]
++	hook_forward		offsetof[entries:p2, int32]
++	hook_local_out		offsetof[entries:p3, int32]
++	hook_post_routing		offsetof[entries:p4, int32]
++	underflow_pre_routing		offsetof[entries:p1, int32]
++	underflow_local_in		offsetof[entries:p2, int32]
++	underflow_forward		offsetof[entries:p3, int32]
++	underflow_local_out		offsetof[entries:p4, int32]
++	underflow_post_routing		offsetof[entries:p5, int32]
++	num_counters		const[6, int32]
++	counters		ptr[out, array[xt_counters, 6]]
++	entries			ipt_so_entries_mangle
++}
++
++ipt_so_entries_mangle {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_so_matches, xa_targets_any]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++	p4	ipt_entry_underflow
++	p5	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_so_replace_security {
++	name			string["security", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[SO_SECURITY_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in		const[0, int32]
++	hook_forward		offsetof[entries:p1, int32]
++	hook_local_out		offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing		ipt_unused
++	underflow_local_in		offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out		offsetof[entries:p3, int32]
++	underflow_post_routing		ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_so_entries_security
++}
++
++ipt_so_entries_security {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_so_matches, xa_targets_any]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++xa_so_matches [
++	so	xt_entry_match_t["so", so_info, 0]
++] [varlen]
++
++# ==================== MATCH CONFIG (so_info) ====================
++# extensions/xt_so.h:
++#	uint32_t flags;                                 /* offset 0  */
++#	DECLARE_BITMAP(level_bitmap, LEVELS_NUM);       /* offset 8, 40 bytes */
++#	uint64_t categ;                                 /* offset 48 */
++#	uint32_t doi;                                   /* offset 56 */
++#							/* sizeof == 64 */
++# The bitmap is an unsigned long[], i.e. 8-byte aligned; modelling it as a byte
++# array puts it at offset 4 and shifts every subsequent field, so test_bit() in
++# so_mt() reads the wrong words even though the total size still matches.
++so_info {
++	flags		flags[xt_so_flags, int32]
++	level_bitmap	array[int64, XT_SO_LEVELMAP_LONGS]
++	categ		int64
++	doi		int32
++}
++
++xt_so_flags = F_SO_MATCH, F_SO_MATCH_INV, F_SO_LEVEL, F_SO_LEVEL_INV, F_SO_CATEG, F_SO_CATEG_INV, F_SO_DOI, F_SO_DOI_INV, F_SO_UNLBL, F_SO_CIPSO, F_SO_ASTRA
++
++# ==================== DIRECT PACKET INJECTION ====================
++# so_mt_reg has no .checkentry, so all 64 lines of xt_so.c are in the packet
++# path, and so_mt() runs for every packet that reaches the rule -- the option
++# loop simply does nothing when there are no options.
++#
++# The in-guest unit test for ipt-so shows the reliable way to get a packet
++# there: a SOCK_RAW/IPPROTO_RAW socket (IP_HDRINCL is implied) sending a
++# hand-built IP packet to 127.0.0.1. It goes out through LOCAL_OUT and
++# POST_ROUTING and comes back in over loopback to PRE_ROUTING and LOCAL_IN,
++# where the rules from netfilter_xt_addons.txt sit. Unlike syz_emit_ethernet
++# this depends on neither the tun device nor the netns the rule was installed
++# in. It is also the packet path for every addon without a .checkentry --
++# TARPIT, ECHO, DELUDE, DHCPMAC, IPMARK, iface, ipv4options, length2 -- and for
++# the *_mt/_tg half of the ones that have one.
++#
++# Two senders:
++#
++#  * sendto$inet_hdrincl reuses ipv4_packet from vnet.txt, so it gets correct
++#    TCP/UDP pseudo-header checksums (prog/checksum.go resolves those by
++#    matching the type name "ipv4_header", which is why the labelled variant
++#    below cannot reuse them) and the full protocol and option variety.
++#
++#  * sendto$inet_hdrincl_labeled uses a self-contained header that ALWAYS
++#    carries an IPOPT_SEC or IPOPT_CIPSO option and always addresses a local
++#    address. Its L4 headers carry a plain int16be checksum instead of a
++#    computed one: loopback sets CHECKSUM_UNNECESSARY, so a wrong L4 checksum
++#    does not stop the packet before the hooks, and raw_send_hdrinc()
++#    recomputes tot_len and the IP checksum anyway.
++#
++# Note that NF_INET_PRE_ROUTING runs inside ip_rcv(), before ip_rcv_finish()
++# and therefore before ip_options_compile() -> cipso_v4_validate(). A CIPSO
++# packet whose DOI is not registered is still seen by a PRE_ROUTING rule, which
++# is why ipt_so_replace_mangle exists: it makes parse_cipso() reachable even
++# without netlabelctl in the guest.
++
++resource sock_raw_hdrincl[sock_in]
++
++socket$inet_raw_hdrincl(domain const[AF_INET], type const[SOCK_RAW], proto const[IPPROTO_RAW]) sock_raw_hdrincl
++sendto$inet_hdrincl(fd sock_raw_hdrincl, buf ptr[in, ipv4_packet], len bytesize[buf], f flags[send_flags], addr ptr[in, sockaddr_in], addrlen len[addr])
++sendto$inet_hdrincl_labeled(fd sock_raw_hdrincl, buf ptr[in, ipv4_labeled_packet], len bytesize[buf], f flags[send_flags], addr ptr[in, sockaddr_in_lo], addrlen len[addr])
++sendto$inet_hdrincl_plain(fd sock_raw_hdrincl, buf ptr[in, ipv4_plain_packet], len bytesize[buf], f flags[send_flags], addr ptr[in, sockaddr_in_lo], addrlen len[addr])
++
++# ---- option-free packets ----
++# tarpit_tg4() bails out immediately on any packet carrying IP options:
++#
++#	/* Our naive response construction does not deal with IP options */
++#	if (ip_hdrlen(skb) != sizeof(struct iphdr))
++#		return NF_DROP;
++#
++# The labelled sender above always adds a security option, so it can never get
++# past that line -- xt_TARPIT.c sat at 3% of 209 lines, which is exactly the
++# handful of early checks before it. This sender pins ihl to 5, so the header is
++# 20 bytes with no options at all. It also serves DELUDE, lscan and psd, which
++# want plain TCP.
++ipv4_plain_packet [
++	tcp	ipv4_plain_packet_t[const[IPPROTO_TCP, int8], so_tcp_ck]
++	syn	ipv4_plain_packet_t[const[IPPROTO_TCP, int8], so_tcp_syn_ck]
++	udp	ipv4_plain_packet_t[const[IPPROTO_UDP, int8], so_udp_ck]
++	icmp	ipv4_plain_packet_t[const[IPPROTO_ICMP, int8], so_icmp_ck]
++] [varlen]
++
++type ipv4_plain_packet_t[PROTO, PAYLOAD] {
++	header	syz_csum_ipv4_header[PROTO]
++	payload	PAYLOAD
++} [packed]
++
++# Named syz_csum_ipv4_header on purpose. prog/checksum.go locates the IPv4
++# header for a pseudo-header checksum by type name and accepts exactly two:
++#
++#	case "ipv4_header", "syz_csum_ipv4_header":
++#		ipSrcAddr, ipDstAddr = extractHeaderParams(groupArg, 4)
++#
++# extractHeaderParams() only needs fields called src_ip and dst_ip, four bytes
++# each. "ipv4_header" belongs to vnet.txt, so this is the one name left that
++# lets a purpose-built header carry working TCP and UDP checksums -- which
++# delude_send_reset() insists on:
++#
++#	if (nf_ip_checksum(oldskb, par->state->hook, ip_hdrlen(oldskb),
++#	                   IPPROTO_TCP))
++#		return;
++#
++# Without it xt_DELUDE.c sits at 0%: every packet is rejected on that line
++# before the reset is ever built. Note that only one such header may appear in
++# a single syscall, which is why the labelled sender below keeps its own
++# checksum-free L4 headers.
++type syz_csum_ipv4_header[PROTO] {
++	ihl		const[5, int8:4]
++	version		const[4, int8:4]
++	ecn		int8:2
++	dscp		int8:6
++	total_len	len[ipv4_plain_packet_t, int16be]
++	id		int16be
++	frag_off	const[0, int16be]
++	ttl		int8[1:64]
++	protocol	PROTO
++	csum		csum[parent, inet, int16be]
++	src_ip		ipv4_lo_addr
++	dst_ip		ipv4_lo_addr
++} [packed]
++
++# Same as so_tcp_hdr but with the flag pool narrowed to what the reply-building
++# targets actually act on. tarpit_generic() and delude_send_reset() both key off
++# "syn && !rst" and then split on ack/fin, so RST (4) is deliberately absent:
++# with fully random flags roughly a third of the packets carry RST and are
++# dropped before either target does anything.
++# FIN=1 SYN=2 RST=4 PSH=8 ACK=16 URG=32.
++so_tcp_hdr_syn {
++	src_port	sock_port
++	dst_port	sock_port
++	seq_num		int32be
++	ack_num		int32be
++	ns		int8:1
++	reserved	const[0, int8:3]
++	data_off	const[5, int8:4]
++	flags		flags[tcp_syn_flags, int8]
++	window_size	int16be
++	csum		int16be
++	urg_ptr		int16be
++	payload		array[int8, 0:32]
++} [packed]
++
++tcp_syn_flags = 2, 3, 10, 16, 17, 18, 24
++
++ipv4_labeled_packet [
++	tcp	ipv4_labeled_packet_t[const[IPPROTO_TCP, int8], so_tcp_hdr]
++	syn	ipv4_labeled_packet_t[const[IPPROTO_TCP, int8], so_tcp_hdr_syn]
++	udp	ipv4_labeled_packet_t[const[IPPROTO_UDP, int8], so_udp_hdr]
++	icmp	ipv4_labeled_packet_t[const[IPPROTO_ICMP, int8], so_icmp_hdr]
++	raw	ipv4_labeled_packet_t[flags[ipv4_types, int8], array[int8, 0:48]]
++] [varlen]
++
++type ipv4_labeled_packet_t[PROTO, PAYLOAD] {
++	header	ipv4_labeled_header[PROTO]
++	payload	PAYLOAD
++} [packed]
++
++# raw_send_hdrinc() overwrites tot_len and check, but keeping them correct
++# costs nothing and keeps the blob valid if it is ever replayed elsewhere.
++type ipv4_labeled_header[PROTO] {
++	ihl		bytesize4[parent, int8:4]
++	version		const[4, int8:4]
++	ecn		int8:2
++	dscp		int8:6
++	total_len	len[ipv4_labeled_packet_t, int16be]
++	id		int16be
++	frag_off	const[0, int16be]
++	ttl		int8[1:64]
++	protocol	PROTO
++	csum		csum[parent, inet, int16be]
++	src_ip		ipv4_lo_addr
++	dst_ip		ipv4_lo_addr
++	options		ipv4_labeled_options
++} [packed]
++
++# At least one security option, so every packet from this syscall drives
++# parse_rfc1108_astra() or parse_cipso(). align[4] pads with zero bytes, which
++# read as IPOPT_END and terminate the option walk.
++# ihl is 4 bits, so the header cannot exceed 60 bytes and the options cannot
++# exceed 40. Both option variants below are bounded so that even two of them
++# stay inside that budget -- otherwise bytesize4 truncates ihl and
++# raw_send_hdrinc() rejects the packet with "iph->ihl * 4 > length".
++# Two security options also drive so_mt()'s "multiple security options are not
++# allowed" path into pproblem/hotdrop.
++ipv4_labeled_options {
++	sec	array[ipv4_security_option, 1:2]
++} [packed, align[4]]
++
++ipv4_security_option [
++	astra	ipv4_option_sec_astra
++	cipso	ipv4_option_cipso_so
++] [varlen]
++
++ipv4_lo_addr [
++	loopback	const[0x7f000001, int32be]
++	local		const[0xac1414aa, int32be]
++] [size[4]]
++
++sockaddr_in_lo {
++	family	const[AF_INET, int16]
++	port	sock_port
++	addr	ipv4_lo_addr
++} [size[16]]
++
++# L4 headers for the option-free sender, with real checksums.
++so_tcp_ck {
++	src_port	sock_port
++	dst_port	sock_port
++	seq_num		int32be
++	ack_num		int32be
++	ns		int8:1
++	reserved	const[0, int8:3]
++	data_off	const[5, int8:4]
++	flags		flags[tcp_flags, int8]
++	window_size	int16be
++	csum		csum[parent, pseudo, IPPROTO_TCP, int16be]
++	urg_ptr		int16be
++	payload		array[int8, 0:32]
++} [packed]
++
++so_tcp_syn_ck {
++	src_port	sock_port
++	dst_port	sock_port
++	seq_num		int32be
++	ack_num		int32be
++	ns		int8:1
++	reserved	const[0, int8:3]
++	data_off	const[5, int8:4]
++	flags		flags[tcp_syn_flags, int8]
++	window_size	int16be
++	csum		csum[parent, pseudo, IPPROTO_TCP, int16be]
++	urg_ptr		int16be
++	payload		array[int8, 0:32]
++} [packed]
++
++so_udp_ck {
++	src_port	sock_port
++	dst_port	sock_port
++	length		bytesize[parent, int16be]
++	csum		csum[parent, pseudo, IPPROTO_UDP, int16be]
++	payload		array[int8, 0:32]
++} [packed]
++
++so_icmp_ck {
++	type		int8
++	code		int8
++	csum		csum[parent, inet, int16be]
++	body		array[int8, 4:32]
++} [packed]
++
++# L4 headers for the labelled sender. A plain int16be instead of a computed
++# checksum: its header cannot also be called syz_csum_ipv4_header, so a
++# csum[..., pseudo, ...] here would make prog/checksum.go panic with "no ipv4
++# nor ipv6 header found". xt_so only parses IP options, so it does not care.
++so_tcp_hdr {
++	src_port	sock_port
++	dst_port	sock_port
++	seq_num		int32be
++	ack_num		int32be
++	ns		int8:1
++	reserved	const[0, int8:3]
++	data_off	const[5, int8:4]
++	flags		flags[tcp_flags, int8]
++	window_size	int16be
++	csum		int16be
++	urg_ptr		int16be
++	payload		array[int8, 0:32]
++} [packed]
++
++so_udp_hdr {
++	src_port	sock_port
++	dst_port	sock_port
++	length		bytesize[parent, int16be]
++	csum		int16be
++	payload		array[int8, 0:32]
++} [packed]
++
++so_icmp_hdr {
++	type		int8
++	code		int8
++	csum		int16be
++	body		array[int8, 4:32]
++} [packed]
++
++# ==================== PACKET-PATH OPTIONS ====================
++# These feed ipv4_security_option above. so_mt() walks the IP options looking
++# for IPOPT_SEC (130) and IPOPT_CIPSO (134). They are deliberately NOT spliced
++# into the ipv4_option union of vnet.txt: patching a shared upstream file made
++# the whole target fail to compile ("unused struct") whenever that one hunk did
++# not land, and the dedicated sender above delivers them at a far higher rate
++# than 2-out-of-14 union members ever could.
++
++# ---- RFC 1108 / Astra IPOPT_SEC ----
++# parse_rfc1108_astra() wants: data[1] >= 4, data[2] == 0xAB ("Unclassified"),
++# data[3] = level, data[4..] = category bytes packed 7-bit-per-byte with the low
++# bit of each byte flagging "another byte follows" (unpack_rfc1108_bits).
++# body has at least one byte so that data[1] >= 4 is satisfiable; the shorter
++# and wrong-classification variants are still reachable through so_sec_class and
++# through the generic ipv4_option variants.
++ipv4_option_sec_astra {
++	type	const[IPOPT_SEC, int8]
++	length	len[parent, int8]
++	class	flags[so_sec_class, int8]
++	body	array[int8, 1:14]
++} [packed]
++
++# 0xAB is the only class parse_rfc1108_astra accepts; the others drive the
++# "not Astra" -> pproblem/hotdrop branch, which is worth covering too.
++so_sec_class = 0xab, 0x0, 0x1, 0x61, 0xff
++
++# ---- CIPSO (IPOPT_CIPSO, RBITMAP tag) ----
++# parse_cipso(): data[1] in (6,40], data[2..5] = DOI, then tags. For tag type 1
++# (RBITMAP): tag[0]=1, tag[1]=taglen (>=4), tag[2]=0 align, tag[3]=level,
++# tag[4..]=category bitmap (msb0-be).
++# doi is drawn from vnet.txt's cipso_doi pool so that a DOI registered through
++# NLBL_CIPSOV4_C_ADD, or by the guest's syz-cipso-doi.service, can match.
++ipv4_option_cipso_so {
++	type	const[IPOPT_CIPSO, int8]
++	length	len[parent, int8]
++	doi	flags[cipso_doi, int32be]
++	tags	array[cipso_rbm_tag_so, 1:1]
++} [packed]
++
++cipso_rbm_tag_so {
++	tagtype	const[CIPSO_V4_TAG_RBITMAP, int8]
++	taglen	len[parent, int8]
++	align	const[0, int8]
++	level	int8
++	bitmap	array[int8, 1:8]
++} [packed]
+diff --git a/sys/linux/netfilter_ipt_so.txt.const b/sys/linux/netfilter_ipt_so.txt.const
+new file mode 100644
+index 0000000..e177c2e
+--- /dev/null
++++ b/sys/linux/netfilter_ipt_so.txt.const
+@@ -0,0 +1,32 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AF_INET = amd64:2
++CIPSO_V4_TAG_RBITMAP = amd64:1
++F_SO_ASTRA = amd64:1024
++F_SO_CATEG = amd64:16
++F_SO_CATEG_INV = amd64:32
++F_SO_CIPSO = amd64:512
++F_SO_DOI = amd64:64
++F_SO_DOI_INV = amd64:128
++F_SO_LEVEL = amd64:4
++F_SO_LEVEL_INV = amd64:8
++F_SO_MATCH = amd64:1
++F_SO_MATCH_INV = amd64:2
++F_SO_UNLBL = amd64:256
++IPOPT_CIPSO = amd64:134
++IPOPT_SEC = amd64:130
++IPPROTO_ICMP = amd64:1
++IPPROTO_RAW = amd64:255
++IPPROTO_TCP = amd64:6
++IPPROTO_UDP = amd64:17
++IPT_SO_SET_REPLACE = amd64:64
++SOCK_RAW = amd64:3
++SOL_IP = amd64:0
++SO_FILTER_VALID_HOOKS = amd64:14
++SO_MANGLE_VALID_HOOKS = amd64:31
++SO_SECURITY_VALID_HOOKS = amd64:14
++XT_SO_LEVELMAP_LONGS = amd64:5
++XT_TABLE_MAXNAMELEN = amd64:32
++__NR_sendto = amd64:44
++__NR_setsockopt = amd64:54
++__NR_socket = amd64:41
