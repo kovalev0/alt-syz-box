@@ -1,0 +1,165 @@
+From afc9d21460627126be21ee174d07b416e5293157 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Thu, 27 Aug 2026 09:40:36 +0000
+Subject: [PATCH 3/4] sys/linux: Add xtables-addons procfs and ACCOUNT sockopt
+ descriptions
+
+The half of the attack surface IPT_SO_SET_REPLACE cannot reach: the
+condition, quota2, DNETMAP and pknock procfs files, and the xt_ACCOUNT
+nf_sockopt_ops ABI on PF_INET base 70.
+
+File names come from xt_addon_names in netfilter_xt_addons.txt, so the fuzzer
+writes to exactly the files its own rules create. The first entry of every name
+set is the containing directory: supportedOpenat() probes str.Values[0] at
+machine-check time and would otherwise disable the description, since the
+per-rule files appear only after a rule is installed.
+---
+ sys/linux/dev_xt_addons.txt       | 112 ++++++++++++++++++++++++++++++
+ sys/linux/dev_xt_addons.txt.const |  19 +++++
+ 2 files changed, 131 insertions(+)
+ create mode 100644 sys/linux/dev_xt_addons.txt
+ create mode 100644 sys/linux/dev_xt_addons.txt.const
+
+diff --git a/sys/linux/dev_xt_addons.txt b/sys/linux/dev_xt_addons.txt
+new file mode 100644
+index 0000000..01c7f47
+--- /dev/null
++++ b/sys/linux/dev_xt_addons.txt
+@@ -0,0 +1,112 @@
++# Copyright 2026 alt-syz-box authors. All rights reserved.
++# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
++#
++# The second half of the xtables-addons attack surface: the per-extension procfs
++# files and the ACCOUNT setsockopt/getsockopt ABI. Neither is reachable through
++# IPT_SO_SET_REPLACE, so without this file condition/quota2/DNETMAP/pknock never
++# get past their checkentry and xt_ACCOUNT.c tops out at its target path (the
++# read interface -- ipt_acc_handle_prepare_read / _copy_data / _free -- is most
++# of that file).
++#
++# The names come from xt_addon_names in netfilter_xt_addons.txt, so the files
++# the fuzzer writes to are exactly the ones its own IPT_SO_SET_REPLACE calls
++# create.
++#
++# NOTE on the first entry of every filename set: supportedOpenat() in
++# pkg/vminfo probes str.Values[0] at machine-check time and disables the whole
++# openat$ description if that path cannot be opened. The per-rule files only
++# appear after a rule is installed, so the first value is always the containing
++# directory, which *_net_init() creates when the module is initialised.
++
++include <linux/socket.h>
++include <uapi/linux/fcntl.h>
++include <linux/netfilter/xt_ACCOUNT.h>
++
++resource fd_xt_condition[fd]
++resource fd_xt_quota2[fd]
++resource fd_xt_dnetmap[fd]
++resource fd_xt_pknock[fd]
++
++# ==================== condition ====================
++# /proc/net/<dir_name>/<name>, dir_name is a module parameter defaulting to
++# "nf_condition". condition_proc_write() looks at the first byte only.
++
++openat$xt_condition(fd const[AT_FDCWD], file ptr[in, string[xt_condition_files]], flags flags[open_flags], mode const[0]) fd_xt_condition
++write$xt_condition(fd fd_xt_condition, data ptr[in, string[xt_condition_values]], len bytesize[data])
++read$xt_condition(fd fd_xt_condition, data ptr[out, array[int8]], len bytesize[data])
++
++xt_condition_files = "/proc/net/nf_condition", "/proc/net/nf_condition/syz0", "/proc/net/nf_condition/syz1", "/proc/net/nf_condition/syz2"
++xt_condition_values = "0", "1", "2"
++
++# ==================== quota2 ====================
++# /proc/net/xt_quota/<name>. quota_proc_write() accepts an optional '+'/'-'
++# prefix followed by a simple_strtoll()-parsable number.
++
++openat$xt_quota2(fd const[AT_FDCWD], file ptr[in, string[xt_quota2_files]], flags flags[open_flags], mode const[0]) fd_xt_quota2
++write$xt_quota2(fd fd_xt_quota2, data ptr[in, string[xt_quota2_values]], len bytesize[data])
++read$xt_quota2(fd fd_xt_quota2, data ptr[out, array[int8]], len bytesize[data])
++
++xt_quota2_files = "/proc/net/xt_quota", "/proc/net/xt_quota/syz0", "/proc/net/xt_quota/syz1", "/proc/net/xt_quota/syz2"
++xt_quota2_values = "0", "1", "+1", "-1", "18446744073709551615", "+9223372036854775807", "-9223372036854775808", "0x10000000000000000"
++
++# ==================== DNETMAP ====================
++# /proc/net/xt_DNETMAP/<prefix>_<cidr> (the directory is spelled "xt_dnetmap"
++# in some packaged versions, both are listed). The file name is derived from
++# the rule prefix, so this is best effort: the values below cover the ones the
++# standard syzkaller address pool can produce.
++# dnetmap_tg_proc_write() dispatches on the first character: 'f' -> "flush",
++# '-'/'+' -> attribute or "addr:addr" pair.
++
++openat$xt_dnetmap(fd const[AT_FDCWD], file ptr[in, string[xt_dnetmap_files]], flags flags[open_flags], mode const[0]) fd_xt_dnetmap
++write$xt_dnetmap(fd fd_xt_dnetmap, data ptr[in, string[xt_dnetmap_values]], len bytesize[data])
++read$xt_dnetmap(fd fd_xt_dnetmap, data ptr[out, array[int8]], len bytesize[data])
++
++xt_dnetmap_files = "/proc/net/xt_DNETMAP", "/proc/net/xt_dnetmap", "/proc/net/xt_DNETMAP/172.20.20.0_24", "/proc/net/xt_dnetmap/172.20.20.0_24", "/proc/net/xt_DNETMAP/0.0.0.0_0", "/proc/net/xt_dnetmap/0.0.0.0_0"
++xt_dnetmap_values = "flush", "+persistent", "-persistent", "+172.20.20.1:172.20.20.2", "-172.20.20.1:172.20.20.2", "+0.0.0.0:255.255.255.255", "-", "+"
++
++# ==================== pknock ====================
++# /proc/net/xt_pknock/<rule_name>, seq_file, read-only.
++
++openat$xt_pknock(fd const[AT_FDCWD], file ptr[in, string[xt_pknock_files]], flags flags[open_flags], mode const[0]) fd_xt_pknock
++read$xt_pknock(fd fd_xt_pknock, data ptr[out, array[int8]], len bytesize[data])
++lseek$xt_pknock(fd fd_xt_pknock, offset fileoff, whence flags[seek_whence])
++
++xt_pknock_files = "/proc/net/xt_pknock", "/proc/net/xt_pknock/syz0", "/proc/net/xt_pknock/syz1", "/proc/net/xt_pknock/syz2"
++
++# ==================== ACCOUNT sockopt ABI ====================
++# xt_ACCOUNT registers its own nf_sockopt_ops on PF_INET, base 70. The handle
++# returned by PREPARE_READ indexes ian->ipt_acc_handles[]; feeding it back into
++# GET_DATA / GET_HANDLE_USAGE / HANDLE_FREE is what exercises
++# ipt_acc_handle_prepare_read(), ipt_acc_handle_copy_data() and the free path.
++
++# ipt_acc_set_ctl() requires len == sizeof(struct ipt_acc_handle_sockopt) (40),
++# ipt_acc_get_ctl() requires *len >= that. GET_DATA and GET_TABLE_NAMES then
++# write itemcount * sizeof(struct ipt_acc_handle_ip) / the name list into the
++# same buffer, hence the oversized variants.
++
++setsockopt$IPT_SO_SET_ACCOUNT_HANDLE_FREE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_ACCOUNT_HANDLE_FREE], val ptr[in, ipt_acc_handle_sockopt], len len[val])
++setsockopt$IPT_SO_SET_ACCOUNT_HANDLE_FREE_ALL(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_ACCOUNT_HANDLE_FREE_ALL], val ptr[in, ipt_acc_handle_sockopt], len len[val])
++
++getsockopt$IPT_SO_GET_ACCOUNT_PREPARE_READ(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_PREPARE_READ], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
++getsockopt$IPT_SO_GET_ACCOUNT_PREPARE_READ_FLUSH(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_PREPARE_READ_FLUSH], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
++getsockopt$IPT_SO_GET_ACCOUNT_GET_HANDLE_USAGE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_HANDLE_USAGE], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
++getsockopt$IPT_SO_GET_ACCOUNT_GET_DATA(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_DATA], val ptr[in, ipt_acc_data_buf], len ptr[in, len[val, int32]])
++getsockopt$IPT_SO_GET_ACCOUNT_GET_TABLE_NAMES(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_TABLE_NAMES], val ptr[in, ipt_acc_names_buf], len ptr[in, len[val, int32]])
++
++# uint32_t handle_nr; char name[ACCOUNT_TABLE_NAME_LEN]; uint32_t itemcount;
++# -> sizeof == 40.
++ipt_acc_handle_sockopt {
++	handle_nr	int32[0:ACCOUNT_MAX_HANDLES]
++	name		string[xt_addon_names, ACCOUNT_TABLE_NAME_LEN]
++	itemcount	int32
++}
++
++ipt_acc_data_buf {
++	handle	ipt_acc_handle_sockopt
++	data	array[int8, 4096]
++}
++
++ipt_acc_names_buf {
++	handle	ipt_acc_handle_sockopt
++	names	array[int8, 1024]
++}
+diff --git a/sys/linux/dev_xt_addons.txt.const b/sys/linux/dev_xt_addons.txt.const
+new file mode 100644
+index 0000000..65d9f2d
+--- /dev/null
++++ b/sys/linux/dev_xt_addons.txt.const
+@@ -0,0 +1,19 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++ACCOUNT_MAX_HANDLES = amd64:10
++ACCOUNT_TABLE_NAME_LEN = amd64:32
++AT_FDCWD = amd64:18446744073709551516
++IPT_SO_GET_ACCOUNT_GET_DATA = amd64:76
++IPT_SO_GET_ACCOUNT_GET_HANDLE_USAGE = amd64:77
++IPT_SO_GET_ACCOUNT_GET_TABLE_NAMES = amd64:78
++IPT_SO_GET_ACCOUNT_PREPARE_READ = amd64:74
++IPT_SO_GET_ACCOUNT_PREPARE_READ_FLUSH = amd64:75
++IPT_SO_SET_ACCOUNT_HANDLE_FREE = amd64:71
++IPT_SO_SET_ACCOUNT_HANDLE_FREE_ALL = amd64:72
++SOL_IP = amd64:0
++__NR_getsockopt = amd64:55
++__NR_lseek = amd64:8
++__NR_openat = amd64:257
++__NR_read = amd64:0
++__NR_setsockopt = amd64:54
++__NR_write = amd64:1
