@@ -1,4 +1,4 @@
-From 8ae4395a467b75483c117426612a31d8bd2d4e28 Mon Sep 17 00:00:00 2001
+From e8c4eb1a76ccfcfc24da1387ff9742cf53a651be Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
 Date: Thu, 27 Aug 2026 09:40:36 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
@@ -23,18 +23,18 @@ a generated rule matched essentially no packet.
 ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 (it triggers a real sysrq action in the guest).
 ---
- sys/linux/netfilter_xt_addons.txt       | 689 ++++++++++++++++++++++++
+ sys/linux/netfilter_xt_addons.txt       | 728 ++++++++++++++++++++++++
  sys/linux/netfilter_xt_addons.txt.const |  74 +++
- 2 files changed, 763 insertions(+)
+ 2 files changed, 802 insertions(+)
  create mode 100644 sys/linux/netfilter_xt_addons.txt
  create mode 100644 sys/linux/netfilter_xt_addons.txt.const
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..da6254e
+index 0000000..6617330
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
-@@ -0,0 +1,689 @@
+@@ -0,0 +1,728 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -145,6 +145,7 @@ index 0000000..da6254e
 +setsockopt$IPT_SO_SET_REPLACE_XA_MANGLE_UDP(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_mangle_udp], len len[val])
 +setsockopt$IPT_SO_SET_REPLACE_XA_NAT(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_nat], len len[val])
 +setsockopt$IPT_SO_SET_REPLACE_XA_SECURITY(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_security], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_XA_PKNOCK(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_pknock], len len[val])
 +
 +# ==================== TABLE SKELETONS ====================
 +# k valid hooks -> k+1 entries: the addon rule, then one policy entry per hook.
@@ -350,6 +351,33 @@ index 0000000..da6254e
 +	p3	ipt_entry_underflow
 +} [packed, align[PTR_SIZE]]
 +
++ipt_xa_replace_pknock {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in			const[0, int32]
++	hook_forward			offsetof[entries:p1, int32]
++	hook_local_out			offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing	ipt_unused
++	underflow_local_in	offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_xa_entries_pknock
++}
++
++ipt_xa_entries_pknock {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_pknock_matches, xa_targets_any]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
 +# ==================== ENTRY TEMPLATE ====================
 +
 +type ipt_xa_entry[PROTO, MATCHES, TARGETS] {
@@ -422,7 +450,6 @@ index 0000000..da6254e
 +	geoip		xt_entry_match_t["geoip", xt_geoip_match_info, 2]
 +	asn		xt_entry_match_t["asn", xt_asn_match_info, 1]
 +	ipv4options	xt_entry_match_t["ipv4options", xt_ipv4options_mtinfo1, 1]
-+	pknock		xt_entry_match_t["pknock", xt_pknock_mtinfo, 1]
 +# so (ipt-so) rides along here as well as in its own skeletons in
 +# netfilter_ipt_so.txt. so_mt_reg declares no .table/.hooks/.proto, so it is
 +# legal in every skeleton above, and these seven syscalls already have corpus
@@ -434,6 +461,18 @@ index 0000000..da6254e
 +] [varlen]
 +
 +# lscan registers with .proto = IPPROTO_TCP.
++# pknock lives in its own skeleton rather than in xa_matches.
++# xt_pknock_mt_init() can fail -- request_module() returns -ENOSYS on a kernel
++# without loadable modules, and crypto_alloc_shash("hmac(sha256)") needs
++# CRYPTO_MANAGER to instantiate the template -- and an unregistered match makes
++# xt_find_match() fail, which takes down the whole IPT_SO_SET_REPLACE blob. At
++# 0..2 matches per rule out of a pool of ten that poisoned roughly a fifth of
++# every table the fuzzer built. Keeping it separate confines the damage to one
++# syscall.
++xa_pknock_matches [
++	pknock	xt_entry_match_t["pknock", xt_pknock_mtinfo, 1]
++] [varlen]
++
 +xa_matches_tcp [
 +	common	xa_matches
 +	lscan	xt_entry_match_t["lscan", xt_lscan_mtinfo, 0]
