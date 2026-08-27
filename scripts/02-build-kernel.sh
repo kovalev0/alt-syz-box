@@ -169,6 +169,19 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e NETFILTER_XTABLES -e NF_CONNTRACK -e NF_NAT \
     -e NF_CONNTRACK_MARK -e NETFILTER_ADVANCED
 
+# xt_pknock_mt_init() bails out with -ENXIO unless crypto_alloc_shash() can
+# produce its default "hmac(sha256)" transform. "hmac(...)" is a crypto
+# *template*, so CRYPTO_MANAGER is required to instantiate it -- CRYPTO_HMAC and
+# CRYPTO_SHA256 alone are not enough. Without this the module never registers:
+# /proc/net/xt_pknock is absent and xt_pknock.c stays at 0% of 214 lines.
+# Note that init also calls request_module(), which returns -ENOSYS when
+# CONFIG_MODULES=n; if pknock still fails, check "dmesg | grep -i pknock" for
+# which of the two messages it printed.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e CRYPTO -e CRYPTO_ALGAPI -e CRYPTO_HASH \
+    -e CRYPTO_MANAGER -e CRYPTO_MANAGER_DISABLE_TESTS \
+    -e CRYPTO_HMAC -e CRYPTO_SHA256
+
 # -- xtables-addons (grafted into net/netfilter/xtables-addons/)
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     -e TEXTSEARCH -e TEXTSEARCH_KMP -e TEXTSEARCH_BM -e TEXTSEARCH_FSM \
@@ -223,7 +236,8 @@ echo "▶ Verifying key kernel options..."
 _missing=0
 for _opt in KCOV KCOV_ENABLE_COMPARISONS KCOV_INSTRUMENT_ALL KASAN DEBUG_INFO \
             NETFILTER_XTABLES IP_NF_IPTABLES IP_NF_SECURITY NETLABEL CIPSO_IPV4 \
-            NETFILTER_XT_MATCH_SO NETFILTER_XT_TARGET_TARPIT; do
+            NETFILTER_XT_MATCH_SO NETFILTER_XT_TARGET_TARPIT \
+            CRYPTO_HMAC CRYPTO_SHA256 CRYPTO_MANAGER; do
     if ! grep -q "^CONFIG_${_opt}=y" "$KERNEL_BUILD_DIR/.config"; then
         echo "  ❌ CONFIG_${_opt} is not =y"
         _missing=1
