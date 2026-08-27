@@ -192,6 +192,15 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e IP_NF_TARGET_REJECT -e IP6_NF_TARGET_REJECT \
     -e NETFILTER_XT_MATCH_TCPUDP
 
+# Fault injection off. It is a good bug finder -- it is what exposed the
+# dnetmap_tg_check() mutex leak -- but right now it is pure cost: every failed
+# vmalloc inside geoip/asn checkentry prints warn_alloc(), and with
+# panic_on_warn=1 that reboots the VM ("WARNING in xt_geoip_mt_checkentry",
+# "... in should_fail_ex"). Drop the -d lines to turn it back on once the
+# already-reported bugs are fixed.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -d FAILSLAB -d FAIL_PAGE_ALLOC -d FAULT_INJECTION_DEBUG_FS
+
 # -- xtables-addons (grafted into net/netfilter/xtables-addons/)
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     -e TEXTSEARCH -e TEXTSEARCH_KMP -e TEXTSEARCH_BM -e TEXTSEARCH_FSM \
