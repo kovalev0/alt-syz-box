@@ -1,6 +1,6 @@
-From afc9d21460627126be21ee174d07b416e5293157 Mon Sep 17 00:00:00 2001
+From dab5b74b7147127ee6e84cc3fd9d8b27a1b23bcf Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
-Date: Thu, 27 Aug 2026 09:40:36 +0000
+Date: Thu, 27 Aug 2026 09:40:37 +0000
 Subject: [PATCH 3/4] sys/linux: Add xtables-addons procfs and ACCOUNT sockopt
  descriptions
 
@@ -14,18 +14,18 @@ set is the containing directory: supportedOpenat() probes str.Values[0] at
 machine-check time and would otherwise disable the description, since the
 per-rule files appear only after a rule is installed.
 ---
- sys/linux/dev_xt_addons.txt       | 112 ++++++++++++++++++++++++++++++
+ sys/linux/dev_xt_addons.txt       | 122 ++++++++++++++++++++++++++++++
  sys/linux/dev_xt_addons.txt.const |  19 +++++
- 2 files changed, 131 insertions(+)
+ 2 files changed, 141 insertions(+)
  create mode 100644 sys/linux/dev_xt_addons.txt
  create mode 100644 sys/linux/dev_xt_addons.txt.const
 
 diff --git a/sys/linux/dev_xt_addons.txt b/sys/linux/dev_xt_addons.txt
 new file mode 100644
-index 0000000..01c7f47
+index 0000000..a2ed9de
 --- /dev/null
 +++ b/sys/linux/dev_xt_addons.txt
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,122 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -102,6 +102,16 @@ index 0000000..01c7f47
 +xt_pknock_files = "/proc/net/xt_pknock", "/proc/net/xt_pknock/syz0", "/proc/net/xt_pknock/syz1", "/proc/net/xt_pknock/syz2"
 +
 +# ==================== ACCOUNT sockopt ABI ====================
++# The whole ACCOUNT block is disabled. ipt_acc_get_ctl() and ipt_acc_set_ctl()
++# both take down(&ian->ipt_acc_userspace_mutex) on every one of the seven
++# commands, and that is where "INFO: trying to register non-static key in
++# ipt_acc_get_ctl" fires -- 51 VM reboots in one run, the single largest crash
++# source once DNETMAP was out. Disabling PREPARE_READ alone was not enough. The
++# ACCOUNT target is disabled too, so nothing here has a table to talk to anyway.
++#
++# It has a C repro. Uncomment the whole block to hunt it again.
++
++# ==================== ACCOUNT sockopt ABI ====================
 +# xt_ACCOUNT registers its own nf_sockopt_ops on PF_INET, base 70. The handle
 +# returned by PREPARE_READ indexes ian->ipt_acc_handles[]; feeding it back into
 +# GET_DATA / GET_HANDLE_USAGE / HANDLE_FREE is what exercises
@@ -112,32 +122,32 @@ index 0000000..01c7f47
 +# write itemcount * sizeof(struct ipt_acc_handle_ip) / the name list into the
 +# same buffer, hence the oversized variants.
 +
-+setsockopt$IPT_SO_SET_ACCOUNT_HANDLE_FREE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_ACCOUNT_HANDLE_FREE], val ptr[in, ipt_acc_handle_sockopt], len len[val])
-+setsockopt$IPT_SO_SET_ACCOUNT_HANDLE_FREE_ALL(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_ACCOUNT_HANDLE_FREE_ALL], val ptr[in, ipt_acc_handle_sockopt], len len[val])
++#setsockopt$IPT_SO_SET_ACCOUNT_HANDLE_FREE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_ACCOUNT_HANDLE_FREE], val ptr[in, ipt_acc_handle_sockopt], len len[val])
++#setsockopt$IPT_SO_SET_ACCOUNT_HANDLE_FREE_ALL(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_ACCOUNT_HANDLE_FREE_ALL], val ptr[in, ipt_acc_handle_sockopt], len len[val])
 +
-+getsockopt$IPT_SO_GET_ACCOUNT_PREPARE_READ(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_PREPARE_READ], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
-+getsockopt$IPT_SO_GET_ACCOUNT_PREPARE_READ_FLUSH(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_PREPARE_READ_FLUSH], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
-+getsockopt$IPT_SO_GET_ACCOUNT_GET_HANDLE_USAGE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_HANDLE_USAGE], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
-+getsockopt$IPT_SO_GET_ACCOUNT_GET_DATA(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_DATA], val ptr[in, ipt_acc_data_buf], len ptr[in, len[val, int32]])
-+getsockopt$IPT_SO_GET_ACCOUNT_GET_TABLE_NAMES(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_TABLE_NAMES], val ptr[in, ipt_acc_names_buf], len ptr[in, len[val, int32]])
++#getsockopt$IPT_SO_GET_ACCOUNT_PREPARE_READ(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_PREPARE_READ], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
++#getsockopt$IPT_SO_GET_ACCOUNT_PREPARE_READ_FLUSH(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_PREPARE_READ_FLUSH], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
++#getsockopt$IPT_SO_GET_ACCOUNT_GET_HANDLE_USAGE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_HANDLE_USAGE], val ptr[in, ipt_acc_handle_sockopt], len ptr[in, len[val, int32]])
++#getsockopt$IPT_SO_GET_ACCOUNT_GET_DATA(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_DATA], val ptr[in, ipt_acc_data_buf], len ptr[in, len[val, int32]])
++#getsockopt$IPT_SO_GET_ACCOUNT_GET_TABLE_NAMES(fd sock_in, level const[SOL_IP], opt const[IPT_SO_GET_ACCOUNT_GET_TABLE_NAMES], val ptr[in, ipt_acc_names_buf], len ptr[in, len[val, int32]])
 +
 +# uint32_t handle_nr; char name[ACCOUNT_TABLE_NAME_LEN]; uint32_t itemcount;
 +# -> sizeof == 40.
-+ipt_acc_handle_sockopt {
-+	handle_nr	int32[0:ACCOUNT_MAX_HANDLES]
-+	name		string[xt_addon_names, ACCOUNT_TABLE_NAME_LEN]
-+	itemcount	int32
-+}
++#ipt_acc_handle_sockopt {
++#	handle_nr	int32[0:ACCOUNT_MAX_HANDLES]
++#	name		string[xt_addon_names, ACCOUNT_TABLE_NAME_LEN]
++#	itemcount	int32
++#}
 +
-+ipt_acc_data_buf {
-+	handle	ipt_acc_handle_sockopt
-+	data	array[int8, 4096]
-+}
++#ipt_acc_data_buf {
++#	handle	ipt_acc_handle_sockopt
++#	data	array[int8, 4096]
++#}
 +
-+ipt_acc_names_buf {
-+	handle	ipt_acc_handle_sockopt
-+	names	array[int8, 1024]
-+}
++#ipt_acc_names_buf {
++#	handle	ipt_acc_handle_sockopt
++#	names	array[int8, 1024]
++#}
 diff --git a/sys/linux/dev_xt_addons.txt.const b/sys/linux/dev_xt_addons.txt.const
 new file mode 100644
 index 0000000..65d9f2d

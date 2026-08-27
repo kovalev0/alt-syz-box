@@ -1,4 +1,4 @@
-From 72acc682b0aaad1d2e2675b0c0967ae0a44b16e5 Mon Sep 17 00:00:00 2001
+From 81c8324216e2472fcce873dec7fd8500865c5a64 Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
 Date: Thu, 27 Aug 2026 09:40:36 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
@@ -23,18 +23,18 @@ a generated rule matched essentially no packet.
 ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 (it triggers a real sysrq action in the guest).
 ---
- sys/linux/netfilter_xt_addons.txt       | 731 ++++++++++++++++++++++++
+ sys/linux/netfilter_xt_addons.txt       | 747 ++++++++++++++++++++++++
  sys/linux/netfilter_xt_addons.txt.const |  74 +++
- 2 files changed, 805 insertions(+)
+ 2 files changed, 821 insertions(+)
  create mode 100644 sys/linux/netfilter_xt_addons.txt
  create mode 100644 sys/linux/netfilter_xt_addons.txt.const
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..ffee9d5
+index 0000000..e3584bb
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
-@@ -0,0 +1,731 @@
+@@ -0,0 +1,747 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -520,10 +520,26 @@ index 0000000..ffee9d5
 +	DHCPMAC	xt_target_t["DHCPMAC", dhcpmac_info, 0]
 +] [varlen]
 +
++# DNETMAP and ACCOUNT are disabled, not because their descriptions are wrong but
++# because both destroy the VM faster than the fuzzer can use it.
++#
++# DNETMAP: dnetmap_tg_check() takes dnetmap_mutex and releases it only at its
++# "out:" label, but the kmalloc failure path inside the address-pool loop does a
++# bare "return 0" -- it returns *success* with the mutex still held. The task
++# then goes back to userspace owning a kernel mutex, so every later DNETMAP
++# operation on that VM deadlocks. That single bug produced 12 "proc registration
++# bug", 4+4+5 "lock held"/"still has locks held", a "possible deadlock in
++# dnetmap_tg_destroy" and a "System is deadlocked on memory" panic in one hour,
++# and drove corpus [xtables-addons] from 18 down to 11.
++#
++# ACCOUNT: ipt_acc_checkentry() -> ipt_acc_table_insert() allocates under
++# spin_lock_bh for every new (netns, table name).
++#
++# Both already have C repros. Put the two lines back to hunt them again; the
++# payload structs below stay commented out so syz-sysgen does not fail the
++# target with "unused struct".
 +xa_nat_targets [
 +	common	xa_targets_any
-+	DNETMAP	xt_target_t["DNETMAP", xt_DNETMAP_tginfo, 0]
-+	ACCOUNT	xt_target_t["ACCOUNT", ipt_acc_info, 1]
 +] [varlen]
 +
 +# ==================== condition (match, rev 1) ====================
@@ -741,31 +757,31 @@ index 0000000..ffee9d5
 +# prefix is a struct nf_nat_range (40 bytes) followed by __u8 flags and
 +# __s32 ttl -> sizeof == 48. If the packaged xtables-addons switched to
 +# nf_nat_range2, add base_proto (int16) at the end of nf_nat_range_dnetmap.
-+xt_DNETMAP_tginfo {
-+	prefix	nf_nat_range_dnetmap
-+	flags	flags[xt_dnetmap_flags, int8]
-+	ttl	int32
-+}
++#xt_DNETMAP_tginfo {
++#	prefix	nf_nat_range_dnetmap
++#	flags	flags[xt_dnetmap_flags, int8]
++#	ttl	int32
++#}
 +
-+xt_dnetmap_flags = XT_DNETMAP_TTL, XT_DNETMAP_REUSE, XT_DNETMAP_PREFIX, XT_DNETMAP_STATIC, XT_DNETMAP_PERSISTENT, XT_DNETMAP_FULL
++#xt_dnetmap_flags = XT_DNETMAP_TTL, XT_DNETMAP_REUSE, XT_DNETMAP_PREFIX, XT_DNETMAP_STATIC, XT_DNETMAP_PERSISTENT, XT_DNETMAP_FULL
 +
-+nf_nat_range_dnetmap {
-+	flags		int32
-+	min_addr	nf_inet_addr
-+	max_addr	nf_inet_addr
-+	min_proto	nf_conntrack_man_proto
-+	max_proto	nf_conntrack_man_proto
-+}
++#nf_nat_range_dnetmap {
++#	flags		int32
++#	min_addr	nf_inet_addr
++#	max_addr	nf_inet_addr
++#	min_proto	nf_conntrack_man_proto
++#	max_proto	nf_conntrack_man_proto
++#}
 +
 +# ==================== ACCOUNT (target, rev 1) ====================
 +# ipt_acc_info: net_ip/net_mask big-endian, table_name (proc name), table_nr set
 +# by the kernel. sizeof == 44.
-+ipt_acc_info {
-+	net_ip		ipv4_addr
-+	net_mask	ipv4_addr_mask
-+	table_name	string[xt_addon_names, ACCOUNT_TABLE_NAME_LEN]
-+	table_nr	int32
-+}
++#ipt_acc_info {
++#	net_ip		ipv4_addr
++#	net_mask	ipv4_addr_mask
++#	table_name	string[xt_addon_names, ACCOUNT_TABLE_NAME_LEN]
++#	table_nr	int32
++#}
 diff --git a/sys/linux/netfilter_xt_addons.txt.const b/sys/linux/netfilter_xt_addons.txt.const
 new file mode 100644
 index 0000000..9b638e7
