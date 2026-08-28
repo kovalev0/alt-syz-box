@@ -1,6 +1,6 @@
-From bc0543697d7c8c01d008b75ab4845efb67e98ce7 Mon Sep 17 00:00:00 2001
+From ef77448070a8c22ae0f7dfbbd1ebe454e26dc917 Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
-Date: Thu, 27 Aug 2026 13:50:04 +0000
+Date: Fri, 28 Aug 2026 09:20:57 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
 
 Seven dedicated IPT_SO_SET_REPLACE skeletons for the grafted matches and
@@ -23,18 +23,18 @@ a generated rule matched essentially no packet.
 ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 (it triggers a real sysrq action in the guest).
 ---
- sys/linux/netfilter_xt_addons.txt       | 762 ++++++++++++++++++++++++
+ sys/linux/netfilter_xt_addons.txt       | 766 ++++++++++++++++++++++++
  sys/linux/netfilter_xt_addons.txt.const |  74 +++
- 2 files changed, 836 insertions(+)
+ 2 files changed, 840 insertions(+)
  create mode 100644 sys/linux/netfilter_xt_addons.txt
  create mode 100644 sys/linux/netfilter_xt_addons.txt.const
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..ec3899b
+index 0000000..de5163a
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
-@@ -0,0 +1,762 @@
+@@ -0,0 +1,766 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -556,7 +556,9 @@ index 0000000..ec3899b
 +xt_quota_mtinfo2 {
 +	name	array[const[0, int8], 15]
 +	flags	flags[xt_quota2_flags, int8]
-+	quota	int64
++# quota_mt2() decrements this per packet and only takes its second branch once
++# the counter runs out, which a random 64-bit value never does.
++	quota	int64[0:65536]
 +	master	const[0, intptr]
 +}
 +
@@ -587,9 +589,11 @@ index 0000000..ec3899b
 +xt_iface_flags = XT_IFACE_UP, XT_IFACE_BROADCAST, XT_IFACE_LOOPBACK, XT_IFACE_POINTOPOINT, XT_IFACE_RUNNING, XT_IFACE_NOARP, XT_IFACE_PROMISC, XT_IFACE_MULTICAST, XT_IFACE_DYNAMIC, XT_IFACE_LOWER_UP, XT_IFACE_DORMANT, XT_IFACE_DEV_IN, XT_IFACE_DEV_OUT
 +
 +# ==================== length2 (match, rev 2) ====================
++# length_mt2() tests "pktlen >= min && pktlen <= max"; with both drawn from the
++# full 32-bit range the window almost never contains a real packet length.
 +xt_length_mtinfo2 {
-+	min	int32
-+	max	int32
++	min	int32[0:2000]
++	max	int32[0:2000]
 +	flags	flags[xt_length2_flags, int16]
 +}
 +
