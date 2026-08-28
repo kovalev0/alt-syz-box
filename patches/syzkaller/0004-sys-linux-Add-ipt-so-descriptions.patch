@@ -1,6 +1,6 @@
-From 94c5956ec1392e818f1f001bbb91560e13be7dee Mon Sep 17 00:00:00 2001
+From ec5a2cd66092a6a09ef4d985690358bbaac71575 Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
-Date: Thu, 27 Aug 2026 09:40:36 +0000
+Date: Fri, 28 Aug 2026 09:20:57 +0000
 Subject: [PATCH 4/4] sys/linux: Add ipt-so descriptions
 
 The "so" match in filter, mangle and security, the two IPv4 security options it
@@ -23,18 +23,18 @@ The security options are not spliced into the ipv4_option union of vnet.txt:
 patching a shared upstream file made syz-sysgen fail the whole target with
 "unused struct" whenever that hunk did not land.
 ---
- sys/linux/netfilter_ipt_so.txt       | 480 +++++++++++++++++++++++++++
+ sys/linux/netfilter_ipt_so.txt       | 492 +++++++++++++++++++++++++++
  sys/linux/netfilter_ipt_so.txt.const |  32 ++
- 2 files changed, 512 insertions(+)
+ 2 files changed, 524 insertions(+)
  create mode 100644 sys/linux/netfilter_ipt_so.txt
  create mode 100644 sys/linux/netfilter_ipt_so.txt.const
 
 diff --git a/sys/linux/netfilter_ipt_so.txt b/sys/linux/netfilter_ipt_so.txt
 new file mode 100644
-index 0000000..8cc3295
+index 0000000..d20d09f
 --- /dev/null
 +++ b/sys/linux/netfilter_ipt_so.txt
-@@ -0,0 +1,480 @@
+@@ -0,0 +1,492 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -313,8 +313,8 @@ index 0000000..8cc3295
 +# dropped before either target does anything.
 +# FIN=1 SYN=2 RST=4 PSH=8 ACK=16 URG=32.
 +so_tcp_hdr_syn {
-+	src_port	sock_port
-+	dst_port	sock_port
++	src_port	so_port
++	dst_port	so_port
 +	seq_num		int32be
 +	ack_num		int32be
 +	ns		int8:1
@@ -324,7 +324,7 @@ index 0000000..8cc3295
 +	window_size	int16be
 +	csum		int16be
 +	urg_ptr		int16be
-+	payload		array[int8, 0:32]
++	payload		array[int8, 0:128]
 +} [packed]
 +
 +tcp_syn_flags = 2, 3, 10, 16, 17, 18, 24
@@ -389,10 +389,22 @@ index 0000000..8cc3295
 +	addr	ipv4_lo_addr
 +} [size[16]]
 +
++# psd counts distinct destination ports per source address: port_in_list() skips
++# a port it has already seen, so with syzkaller's sock_port -- int16be[20000:20004],
++# five values -- host->weight can never reach weight_threshold and xt_psd.c is
++# capped no matter how many packets are sent. lscan and length2 want the variety
++# too. The union keeps the narrow pool as one half, because xt_pknock only makes
++# progress when a packet's destination port equals one of the knock ports, which
++# are still drawn from sock_port.
++so_port [
++	wide	int16be
++	syz	sock_port
++] [size[2]]
++
 +# L4 headers for the option-free sender, with real checksums.
 +so_tcp_ck {
-+	src_port	sock_port
-+	dst_port	sock_port
++	src_port	so_port
++	dst_port	so_port
 +	seq_num		int32be
 +	ack_num		int32be
 +	ns		int8:1
@@ -402,12 +414,12 @@ index 0000000..8cc3295
 +	window_size	int16be
 +	csum		csum[parent, pseudo, IPPROTO_TCP, int16be]
 +	urg_ptr		int16be
-+	payload		array[int8, 0:32]
++	payload		array[int8, 0:128]
 +} [packed]
 +
 +so_tcp_syn_ck {
-+	src_port	sock_port
-+	dst_port	sock_port
++	src_port	so_port
++	dst_port	so_port
 +	seq_num		int32be
 +	ack_num		int32be
 +	ns		int8:1
@@ -417,22 +429,22 @@ index 0000000..8cc3295
 +	window_size	int16be
 +	csum		csum[parent, pseudo, IPPROTO_TCP, int16be]
 +	urg_ptr		int16be
-+	payload		array[int8, 0:32]
++	payload		array[int8, 0:128]
 +} [packed]
 +
 +so_udp_ck {
-+	src_port	sock_port
-+	dst_port	sock_port
++	src_port	so_port
++	dst_port	so_port
 +	length		bytesize[parent, int16be]
 +	csum		csum[parent, pseudo, IPPROTO_UDP, int16be]
-+	payload		array[int8, 0:32]
++	payload		array[int8, 0:128]
 +} [packed]
 +
 +so_icmp_ck {
 +	type		int8
 +	code		int8
 +	csum		csum[parent, inet, int16be]
-+	body		array[int8, 4:32]
++	body		array[int8, 4:64]
 +} [packed]
 +
 +# L4 headers for the labelled sender. A plain int16be instead of a computed
@@ -440,8 +452,8 @@ index 0000000..8cc3295
 +# csum[..., pseudo, ...] here would make prog/checksum.go panic with "no ipv4
 +# nor ipv6 header found". xt_so only parses IP options, so it does not care.
 +so_tcp_hdr {
-+	src_port	sock_port
-+	dst_port	sock_port
++	src_port	so_port
++	dst_port	so_port
 +	seq_num		int32be
 +	ack_num		int32be
 +	ns		int8:1
@@ -451,22 +463,22 @@ index 0000000..8cc3295
 +	window_size	int16be
 +	csum		int16be
 +	urg_ptr		int16be
-+	payload		array[int8, 0:32]
++	payload		array[int8, 0:128]
 +} [packed]
 +
 +so_udp_hdr {
-+	src_port	sock_port
-+	dst_port	sock_port
++	src_port	so_port
++	dst_port	so_port
 +	length		bytesize[parent, int16be]
 +	csum		int16be
-+	payload		array[int8, 0:32]
++	payload		array[int8, 0:128]
 +} [packed]
 +
 +so_icmp_hdr {
 +	type		int8
 +	code		int8
 +	csum		int16be
-+	body		array[int8, 4:32]
++	body		array[int8, 4:64]
 +} [packed]
 +
 +# ==================== PACKET-PATH OPTIONS ====================
