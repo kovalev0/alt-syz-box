@@ -1,6 +1,6 @@
-From ef77448070a8c22ae0f7dfbbd1ebe454e26dc917 Mon Sep 17 00:00:00 2001
+From 52e5c8bb8dd2351d0d9cd1a0fff80afac297bddc Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
-Date: Fri, 28 Aug 2026 09:20:57 +0000
+Date: Sun, 30 Aug 2026 15:21:56 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
 
 Seven dedicated IPT_SO_SET_REPLACE skeletons for the grafted matches and
@@ -23,18 +23,18 @@ a generated rule matched essentially no packet.
 ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 (it triggers a real sysrq action in the guest).
 ---
- sys/linux/netfilter_xt_addons.txt       | 766 ++++++++++++++++++++++++
- sys/linux/netfilter_xt_addons.txt.const |  74 +++
- 2 files changed, 840 insertions(+)
+ sys/linux/netfilter_xt_addons.txt       | 1000 +++++++++++++++++++++++
+ sys/linux/netfilter_xt_addons.txt.const |   77 ++
+ 2 files changed, 1077 insertions(+)
  create mode 100644 sys/linux/netfilter_xt_addons.txt
  create mode 100644 sys/linux/netfilter_xt_addons.txt.const
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..de5163a
+index 0000000..775e6ec
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
-@@ -0,0 +1,766 @@
+@@ -0,0 +1,1000 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -145,6 +145,10 @@ index 0000000..de5163a
 +setsockopt$IPT_SO_SET_REPLACE_XA_MANGLE_UDP(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_mangle_udp], len len[val])
 +setsockopt$IPT_SO_SET_REPLACE_XA_NAT(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_nat], len len[val])
 +setsockopt$IPT_SO_SET_REPLACE_XA_SECURITY(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_security], len len[val])
++setsockopt$IP6T_SO_SET_REPLACE_XA_FILTER(fd sock_in6, level const[SOL_IPV6], opt const[IP6T_SO_SET_REPLACE], val ptr[in, ip6t_xa_replace_filter], len len[val])
++setsockopt$IP6T_SO_SET_REPLACE_XA_FILTER_TCP(fd sock_in6, level const[SOL_IPV6], opt const[IP6T_SO_SET_REPLACE], val ptr[in, ip6t_xa_replace_filter_tcp], len len[val])
++setsockopt$IP6T_SO_SET_REPLACE_XA_FILTER_UDP(fd sock_in6, level const[SOL_IPV6], opt const[IP6T_SO_SET_REPLACE], val ptr[in, ip6t_xa_replace_filter_udp], len len[val])
++setsockopt$IP6T_SO_SET_REPLACE_XA_MANGLE(fd sock_in6, level const[SOL_IPV6], opt const[IP6T_SO_SET_REPLACE], val ptr[in, ip6t_xa_replace_mangle], len len[val])
 +setsockopt$IPT_SO_SET_REPLACE_XA_PKNOCK(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_pknock], len len[val])
 +
 +# ==================== TABLE SKELETONS ====================
@@ -377,6 +381,236 @@ index 0000000..de5163a
 +	p2	ipt_entry_underflow
 +	p3	ipt_entry_underflow
 +} [packed, align[PTR_SIZE]]
++
++# ==================== IPv6 SKELETONS ====================
++# Six of the grafted modules carry a whole second half for IPv6 --
++# tarpit_tg6/tarpit_tcp6, echo_tg6, psd handle_packet6, length2_mt6,
++# xt_geoip_mt6, xt_asn_mt6 -- and none of it was reachable while every skeleton
++# spoke ip_tables. Same layout as the IPv4 ones: k+1 entries, the rule first,
++# strictly increasing hook_entry/underflow, num_counters equal to the initial
++# table's entry count.
++#
++# Only extensions that actually register for NFPROTO_IPV6 appear here. A name
++# that xt_find_match() cannot resolve for the family rejects the whole blob, so
++# CHAOS, DELUDE, DHCPMAC, ipv4options, pknock and lscan-as-a-target stay out.
++#
++# ip6t_ip6 is a wildcard like its IPv4 counterpart, except that flags carries
++# IP6T_F_PROTO where proto is pinned: ip6_packet_match() only looks at proto
++# when that bit is set, while xt_check_target() looks at it unconditionally.
++
++ip6t_xa_replace_filter {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in		const[0, int32]
++	hook_forward		offsetof[entries:p1, int32]
++	hook_local_out		offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing		ipt_unused
++	underflow_local_in		offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out		offsetof[entries:p3, int32]
++	underflow_post_routing		ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ip6t_xa_entries_filter
++}
++
++ip6t_xa_entries_filter {
++	rule	ip6t_xa_entry[ip6t_xa_ip_any, xa6_matches, xa6_filter_targets]
++	p1	ip6t_entry_underflow
++	p2	ip6t_entry_underflow
++	p3	ip6t_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ip6t_xa_replace_filter_tcp {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in		const[0, int32]
++	hook_forward		offsetof[entries:p1, int32]
++	hook_local_out		offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing		ipt_unused
++	underflow_local_in		offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out		offsetof[entries:p3, int32]
++	underflow_post_routing		ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ip6t_xa_entries_filter_tcp
++}
++
++ip6t_xa_entries_filter_tcp {
++	rule	ip6t_xa_entry[ip6t_xa_ip_tcp, xa6_matches_tcp, xa6_filter_tcp_targets]
++	p1	ip6t_entry_underflow
++	p2	ip6t_entry_underflow
++	p3	ip6t_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ip6t_xa_replace_filter_udp {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in		const[0, int32]
++	hook_forward		offsetof[entries:p1, int32]
++	hook_local_out		offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing		ipt_unused
++	underflow_local_in		offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out		offsetof[entries:p3, int32]
++	underflow_post_routing		ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ip6t_xa_entries_filter_udp
++}
++
++ip6t_xa_entries_filter_udp {
++	rule	ip6t_xa_entry[ip6t_xa_ip_udp, xa6_matches, xa6_filter_udp_targets]
++	p1	ip6t_entry_underflow
++	p2	ip6t_entry_underflow
++	p3	ip6t_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ip6t_xa_replace_mangle {
++	name			string["mangle", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_MANGLE_VALID_HOOKS, int32]
++	num_entries		const[6, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		const[0, int32]
++	hook_local_in		offsetof[entries:p1, int32]
++	hook_forward		offsetof[entries:p2, int32]
++	hook_local_out		offsetof[entries:p3, int32]
++	hook_post_routing		offsetof[entries:p4, int32]
++	underflow_pre_routing		offsetof[entries:p1, int32]
++	underflow_local_in		offsetof[entries:p2, int32]
++	underflow_forward		offsetof[entries:p3, int32]
++	underflow_local_out		offsetof[entries:p4, int32]
++	underflow_post_routing		offsetof[entries:p5, int32]
++	num_counters		const[6, int32]
++	counters		ptr[out, array[xt_counters, 6]]
++	entries			ip6t_xa_entries_mangle
++}
++
++ip6t_xa_entries_mangle {
++	rule	ip6t_xa_entry[ip6t_xa_ip_any, xa6_matches, xa6_mangle_targets]
++	p1	ip6t_entry_underflow
++	p2	ip6t_entry_underflow
++	p3	ip6t_entry_underflow
++	p4	ip6t_entry_underflow
++	p5	ip6t_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++type ip6t_xa_entry[IP6, MATCHES, TARGETS] {
++	matches	ip6t_xa_entry_matches[IP6, MATCHES]
++	target	TARGETS
++} [packed, align[PTR_SIZE]]
++
++type ip6t_xa_entry_matches[IP6, MATCHES] {
++	ipv6		IP6
++	nfcache		const[0, int32]
++	target_offset	len[parent, int16]
++	next_offset	len[ip6t_xa_entry, int16]
++	comefrom	const[0, int32]
++	counters	xt_counters
++	matches		array[MATCHES, 0:2]
++} [align[PTR_SIZE]]
++
++ip6t_xa_ip_any {
++	src		ipv6_addr_empty
++	dst		ipv6_addr_empty
++	smsk		ipv6_addr_empty
++	dmsk		ipv6_addr_empty
++	iniface		array[const[0, int8], IFNAMSIZ]
++	outiface	array[const[0, int8], IFNAMSIZ]
++	iniface_mask	array[const[0, int8], IFNAMSIZ]
++	outiface_mask	array[const[0, int8], IFNAMSIZ]
++	proto		const[0, int16]
++	tos		const[0, int8]
++	flags		const[0, int8]
++	invflags	const[0, int8]
++}
++
++ip6t_xa_ip_tcp {
++	src		ipv6_addr_empty
++	dst		ipv6_addr_empty
++	smsk		ipv6_addr_empty
++	dmsk		ipv6_addr_empty
++	iniface		array[const[0, int8], IFNAMSIZ]
++	outiface	array[const[0, int8], IFNAMSIZ]
++	iniface_mask	array[const[0, int8], IFNAMSIZ]
++	outiface_mask	array[const[0, int8], IFNAMSIZ]
++	proto		const[IPPROTO_TCP, int16]
++	tos		const[0, int8]
++	flags		const[IP6T_F_PROTO, int8]
++	invflags	const[0, int8]
++}
++
++ip6t_xa_ip_udp {
++	src		ipv6_addr_empty
++	dst		ipv6_addr_empty
++	smsk		ipv6_addr_empty
++	dmsk		ipv6_addr_empty
++	iniface		array[const[0, int8], IFNAMSIZ]
++	outiface	array[const[0, int8], IFNAMSIZ]
++	iniface_mask	array[const[0, int8], IFNAMSIZ]
++	outiface_mask	array[const[0, int8], IFNAMSIZ]
++	proto		const[IPPROTO_UDP, int16]
++	tos		const[0, int8]
++	flags		const[IP6T_F_PROTO, int8]
++	invflags	const[0, int8]
++}
++
++# type ipv6_addr_empty array[const[0, int8], 16]
++
++# Registered for NFPROTO_IPV6: condition, quota2, fuzzy, iface, length2, psd,
++# geoip, asn.
++xa6_matches [
++	condition	xt_entry_match_t["condition", xt_condition_mtinfo, 1]
++	quota2		xt_entry_match_t["quota2", xt_quota_mtinfo2, 3]
++	fuzzy		xt_entry_match_t["fuzzy", xt_fuzzy_mtinfo, 1]
++	iface		xt_entry_match_t["iface", xt_iface_mtinfo, 0]
++	length2		xt_entry_match_t["length2", xt_length_mtinfo2, 2]
++	psd		xt_entry_match_t["psd", xt_psd_info, 1]
++	geoip		xt_entry_match_t["geoip", xt_geoip_match_info, 2]
++	asn		xt_entry_match_t["asn", xt_asn_match_info, 1]
++] [varlen]
++
++xa6_matches_tcp [
++	common	xa6_matches
++	lscan	xt_entry_match_t["lscan", xt_lscan_mtinfo, 0]
++] [varlen]
++
++xa6_targets_any [
++	LOGMARK	xt_target_t["LOGMARK", xt_logmark_tginfo, 0]
++] [varlen]
++
++xa6_filter_targets [
++	common	xa6_targets_any
++] [varlen]
++
++xa6_filter_tcp_targets [
++	common	xa6_targets_any
++	TARPIT	xt_target_t["TARPIT", xt_tarpit_tginfo, 0]
++] [varlen]
++
++xa6_filter_udp_targets [
++	common	xa6_targets_any
++	ECHO	xt_target_t["ECHO", void, 0]
++] [varlen]
++
++xa6_mangle_targets [
++	common	xa6_targets_any
++	IPMARK	xt_target_t["IPMARK", xt_ipmark_tginfo, 1]
++	PROTO	xt_target_t["PROTO", xt_PROTO_info, 0]
++] [varlen]
 +
 +# ==================== ENTRY TEMPLATE ====================
 +
@@ -803,19 +1037,22 @@ index 0000000..de5163a
 +#}
 diff --git a/sys/linux/netfilter_xt_addons.txt.const b/sys/linux/netfilter_xt_addons.txt.const
 new file mode 100644
-index 0000000..9b638e7
+index 0000000..ac20e8d
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt.const
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,77 @@
 +# Code generated by syz-sysgen. DO NOT EDIT.
 +arches = amd64
 +ACCOUNT_TABLE_NAME_LEN = amd64:32
 +CONDITION_NAME_LEN = amd64:31
 +IFNAMSIZ = amd64:16
++IP6T_F_PROTO = amd64:1
++IP6T_SO_SET_REPLACE = amd64:64
 +IPPROTO_TCP = amd64:6
 +IPPROTO_UDP = amd64:17
 +IPT_SO_SET_REPLACE = amd64:64
 +SOL_IP = amd64:0
++SOL_IPV6 = amd64:41
 +XA_FILTER_VALID_HOOKS = amd64:14
 +XA_MANGLE_VALID_HOOKS = amd64:31
 +XA_NAT_VALID_HOOKS = amd64:27
