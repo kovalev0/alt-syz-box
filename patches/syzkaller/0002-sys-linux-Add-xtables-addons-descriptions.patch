@@ -1,6 +1,6 @@
-From 52e5c8bb8dd2351d0d9cd1a0fff80afac297bddc Mon Sep 17 00:00:00 2001
+From 253639d78c7001a8eabe530007646facaa8f8986 Mon Sep 17 00:00:00 2001
 From: Vasiliy Kovalev <kovalev@altlinux.org>
-Date: Sun, 30 Aug 2026 15:21:56 +0000
+Date: Tue, 1 Sep 2026 20:13:45 +0000
 Subject: [PATCH 2/4] sys/linux: Add xtables-addons descriptions
 
 Seven dedicated IPT_SO_SET_REPLACE skeletons for the grafted matches and
@@ -23,18 +23,18 @@ a generated rule matched essentially no packet.
 ipp2p is omitted (ALT p11 does not ship xt_ipp2p.c) and SYSRQ is omitted
 (it triggers a real sysrq action in the guest).
 ---
- sys/linux/netfilter_xt_addons.txt       | 1000 +++++++++++++++++++++++
+ sys/linux/netfilter_xt_addons.txt       | 1046 +++++++++++++++++++++++
  sys/linux/netfilter_xt_addons.txt.const |   77 ++
- 2 files changed, 1077 insertions(+)
+ 2 files changed, 1123 insertions(+)
  create mode 100644 sys/linux/netfilter_xt_addons.txt
  create mode 100644 sys/linux/netfilter_xt_addons.txt.const
 
 diff --git a/sys/linux/netfilter_xt_addons.txt b/sys/linux/netfilter_xt_addons.txt
 new file mode 100644
-index 0000000..775e6ec
+index 0000000..22702f9
 --- /dev/null
 +++ b/sys/linux/netfilter_xt_addons.txt
-@@ -0,0 +1,1000 @@
+@@ -0,0 +1,1046 @@
 +# Copyright 2026 alt-syz-box authors. All rights reserved.
 +# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 +#
@@ -150,6 +150,7 @@ index 0000000..775e6ec
 +setsockopt$IP6T_SO_SET_REPLACE_XA_FILTER_UDP(fd sock_in6, level const[SOL_IPV6], opt const[IP6T_SO_SET_REPLACE], val ptr[in, ip6t_xa_replace_filter_udp], len len[val])
 +setsockopt$IP6T_SO_SET_REPLACE_XA_MANGLE(fd sock_in6, level const[SOL_IPV6], opt const[IP6T_SO_SET_REPLACE], val ptr[in, ip6t_xa_replace_mangle], len len[val])
 +setsockopt$IPT_SO_SET_REPLACE_XA_PKNOCK(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_pknock], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_XA_DELUDE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_xa_replace_delude], len len[val])
 +
 +# ==================== TABLE SKELETONS ====================
 +# k valid hooks -> k+1 entries: the addon rule, then one policy entry per hook.
@@ -209,6 +210,47 @@ index 0000000..775e6ec
 +
 +ipt_xa_entries_filter_tcp {
 +	rule	ipt_xa_entry[ipt_xa_proto_tcp, xa_matches_tcp, xa_filter_tcp_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++# DELUDE gets a skeleton of its own, like pknock. It is reachable only through
++# xa_filter_tcp_targets, where it is one of four targets, and it additionally
++# needs a TCP packet whose checksum delude_send_reset() accepts:
++#
++#	if (nf_ip_checksum(oldskb, par->state->hook, ip_hdrlen(oldskb),
++#	                   IPPROTO_TCP))
++#		return;
++#
++# That is a three-way coincidence -- the right setsockopt, the right target
++# drawn from the union, and a raw sender in the same program -- and once the
++# IPv6 skeletons opened several hundred new lines the fuzzer stopped spending
++# budget on it: xt_DELUDE.c went from 43% to 0 while xt_CHAOS.c and xt_lscan.c,
++# which share the same skeleton, merely dropped. A dedicated syscall makes the
++# target certain and leaves only the packet to chance.
++ipt_xa_replace_delude {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[XA_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing		ipt_unused
++	hook_local_in			const[0, int32]
++	hook_forward			offsetof[entries:p1, int32]
++	hook_local_out			offsetof[entries:p2, int32]
++	hook_post_routing		ipt_unused
++	underflow_pre_routing	ipt_unused
++	underflow_local_in	offsetof[entries:p1, int32]
++	underflow_forward		offsetof[entries:p2, int32]
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_xa_entries_delude
++}
++
++ipt_xa_entries_delude {
++	rule	ipt_xa_entry[ipt_xa_proto_tcp, xa_matches_tcp, xa_delude_targets]
 +	p1	ipt_entry_underflow
 +	p2	ipt_entry_underflow
 +	p3	ipt_entry_underflow
@@ -741,6 +783,10 @@ index 0000000..775e6ec
 +	common	xa_targets_any
 +	CHAOS	xt_target_t["CHAOS", xt_chaos_tginfo, 0]
 +	TARPIT	xt_target_t["TARPIT", xt_tarpit_tginfo, 0]
++	DELUDE	xt_target_t["DELUDE", void, 0]
++] [varlen]
++
++xa_delude_targets [
 +	DELUDE	xt_target_t["DELUDE", void, 0]
 +] [varlen]
 +
