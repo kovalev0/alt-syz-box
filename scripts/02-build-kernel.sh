@@ -148,7 +148,11 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e 9P_FS -e 9P_FS_POSIX_ACL \
     -e NET_9P -e NET_9P_VIRTIO
 
-# ---------------------------------------------------
+# fix SYZFAIL: tun: ioctl(TUNSETIFF) failed (errno 16: Device or resource busy)
+# err    --set-str LSM "selinux"
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    --set-str LSM "landlock,lockdown,yama,loadpin,safesetid,smack,tomoyo,apparmor,ipe,bpf,altha,kiosk"
+
 # netfilter
 
 # base
@@ -294,13 +298,6 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e BPF_UNPRIV_DEFAULT_OFF -e BPF_LSM -e CGROUP_BPF \
     -e NET_CLS_BPF -e NET_ACT_BPF -e BPF_STREAM_PARSER \
     -e LWTUNNEL_BPF -e BPF_EVENTS -e BPF_KPROBE_OVERRIDE
-
-# fix SYZFAIL: tun: ioctl(TUNSETIFF) failed (errno 16: Device or resource busy)
-# err    --set-str LSM "selinux"
-./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
-    --set-str LSM "landlock,lockdown,yama,loadpin,safesetid,smack,tomoyo,apparmor,ipe,bpf,altha,kiosk"
-
-# ---------------------------------------------------
 
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
