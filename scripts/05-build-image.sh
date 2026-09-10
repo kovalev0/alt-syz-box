@@ -54,7 +54,7 @@ if [ ! -f "$IMAGE_PATH" ]; then
     wget --no-check-certificate --progress=dot:mega "$IMAGE_BASE_URL/$IMAGE_FILENAME.xz"
     unxz "./$IMAGE_FILENAME.xz"
     # Needed for C repro generation
-    PACKAGES_TO_INSTALL="gcc"
+    PACKAGES_TO_INSTALL="$PACKAGES_TO_INSTALL gcc"
 else
     echo "Guest image $IMAGE_PATH already exists. Skipping download."
 fi
