@@ -82,6 +82,11 @@ else
     echo "No kernel patches found to apply."
 fi
 
+
+# 2b. Graft out-of-tree modules into the kernel source tree before defconfig
+echo "Grafting out-of-tree modules into kernel source tree..."
+"$CONTAINER_REPO_DIR/scripts/graft-oot-dm-secdel.sh"
+
 mkdir -p "$KERNEL_BUILD_DIR"
 
 # 3. Configure the kernel
@@ -167,6 +172,10 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e BLK_DEV_RAM -e BLK_DEV_LOOP \
     --set-val BLK_DEV_RAM_COUNT 8 \
     --set-val BLK_DEV_RAM_SIZE 32768
+
+# -- dm-secdel (grafted into drivers/md/) ----------
+# The only target this branch adds.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" -e DM_SECDEL
 
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
