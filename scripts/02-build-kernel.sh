@@ -153,6 +153,21 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     --set-str LSM "landlock,lockdown,yama,loadpin,safesetid,smack,tomoyo,apparmor,ipe,bpf,altha,kiosk"
 
+# -- device-mapper core ----------------------------
+# dm core only; each layered branch adds its own targets on top. DM_INIT
+# builds the mapped devices from dm-mod.create= on the command line at boot.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e MD -e BLK_DEV_DM -e DM_BUFIO -e DM_DEBUG -e DM_UEVENT \
+    -e DM_INIT -e DM_ZERO
+
+# -- backing devices -------------------------------
+# Eight brd ramdisks (the multi-device targets need three or four at once) and
+# loop; 65536 sectors each, matching dm_target_lengths in the descriptions.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e BLK_DEV_RAM -e BLK_DEV_LOOP \
+    --set-val BLK_DEV_RAM_COUNT 8 \
+    --set-val BLK_DEV_RAM_SIZE 32768
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
