@@ -175,6 +175,17 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e DM_LOG_WRITES -e DM_EBS -e DM_SWITCH -e DM_MIRROR \
     -e DM_MULTIPATH -e DM_MULTIPATH_QL -e DM_MULTIPATH_ST
 
+# -- data-transforming dm targets ------------------
+# dm-crypt, verity and integrity, and the crypto their constructors allocate.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e DM_CRYPT -e DM_VERITY -e DM_VERITY_FEC -e DM_INTEGRITY -e AUDIT -e DM_AUDIT
+
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e CRYPTO_NULL -e CRYPTO_AES -e CRYPTO_CBC -e CRYPTO_XTS \
+    -e CRYPTO_ESSIV -e CRYPTO_SHA256 -e CRYPTO_SHA1 -e CRYPTO_CRC32C \
+    -e CRYPTO_HMAC -e CRYPTO_AUTHENC -e CRYPTO_USER_API_SKCIPHER \
+    -e CRYPTO_USER_API_HASH -e CRYPTO_LIB_UTILS
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
