@@ -1,0 +1,31 @@
+{
+    "target": "linux/amd64",
+    "http": "0.0.0.0:${DEFAULT_SYZ_HTTP_INTERNAL_PORT}",
+    "workdir": "${SYZKALLER_WORKDIR}",
+    "kernel_obj": "${KERNEL_BUILD_DIR}",
+    "kernel_src": "${KERNEL_DIR}",
+    "image": "${IMAGE_PATH}",
+    "sshkey": "${SSH_KEY_PATH}",
+    "ssh_user": "root",
+    "syzkaller": "${SYZKALLER_DIR}",
+    "procs": 8,
+    "type": "qemu",
+    "sandbox": "none",
+    "cover": true,
+    "execprog_bin_on_target": "/bin/linux_amd64/syz-execprog",
+    "executor_bin_on_target": "/bin/linux_amd64/syz-executor",
+    "vm": {
+        "qemu": "${QEMU_BUILD_DIR}/usr/bin/qemu-system-x86_64",
+        "count": 4,
+        "qemu_args": "-enable-kvm",
+        "kernel": "${KERNEL_BZIMAGE}",
+        "cpu": 4,
+        "cmdline": "root=/dev/sda3 brd.rd_nr=8 brd.rd_size=32768 brd.max_part=1 dm-mod.create=\"syzsecdel0,,0,rw, 0 65536 secdel 1:0 0 1R0;syzkeep,,1,rw, 0 65536 secdel 1:1 0 01R10;syzio,,2,rw, 0 65536 secdel 1:2 0 1R0;syzpart,,3,rw, 0 4096 secdel 1:3 8 0R1\"",
+        "mem": 4096
+    },
+    "cover_filter": {
+        "files": [
+            "^drivers/md/"
+        ]
+    }
+}
