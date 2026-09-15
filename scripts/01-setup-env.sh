@@ -12,14 +12,14 @@
 export TERM="xterm-256color"
 
 # General kernel local verion
-export KERNEL_LOCALVERSION="alt-syz-box-drivers_md_persistent-data"
+export KERNEL_LOCALVERSION="alt-syz-box-drivers_md_raid"
 
 # Select which syzkaller config template to use from 'config/syzkaller/'
-export SYZ_CONFIG_TEMPLATE="drivers_md_persistent-data"
+export SYZ_CONFIG_TEMPLATE="drivers_md_raid"
 
 # Space-separated list of sys/linux/*.txt files for which to regenerate
 # .const via syz-extract during the syzkaller build
-export SYZ_EXTRACT_TARGETS="dev_dm.txt dev_dm_targets.txt dev_dm_crypt.txt dev_dm_persistent.txt"
+export SYZ_EXTRACT_TARGETS="dev_dm.txt dev_dm_targets.txt dev_dm_crypt.txt dev_dm_persistent.txt dev_md.txt"
 
 # ALT Linux branch ('p11', 'p10', 'sisyphus', etc.)
 export ALT_BRANCH="p11"
