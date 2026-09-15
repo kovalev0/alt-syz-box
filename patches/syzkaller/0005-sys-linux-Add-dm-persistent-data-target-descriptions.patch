@@ -1,0 +1,158 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Mon, 21 Sep 2026 11:22:14 +0000
+Subject: [PATCH] sys/linux: add dm persistent-data target descriptions
+
+Constructor grammars for the metadata-backed dm targets that reach
+drivers/md/persistent-data/: snapshot, thin, cache, clone, era and
+writecache.
+
+---
+ sys/linux/dev_dm_persistent.txt       | 125 ++++++++++++++++++++++++++
+ sys/linux/dev_dm_persistent.txt.const |   5 ++
+ 2 files changed, 130 insertions(+)
+ create mode 100644 sys/linux/dev_dm_persistent.txt
+ create mode 100644 sys/linux/dev_dm_persistent.txt.const
+
+diff --git a/sys/linux/dev_dm_persistent.txt b/sys/linux/dev_dm_persistent.txt
+new file mode 100644
+index 0000000..513b1c3
+--- /dev/null
++++ b/sys/linux/dev_dm_persistent.txt
+@@ -0,0 +1,125 @@
++include <linux/ioctl.h>
++include <uapi/linux/dm-ioctl.h>
++
++# ==================== IOCTLS / CALLS ====================
++
++ioctl$DM_TABLE_LOAD_snaporigin(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_snaporigin])
++ioctl$DM_TABLE_LOAD_snapshot(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_snapshot])
++ioctl$DM_TABLE_LOAD_thinpool(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_thinpool])
++ioctl$DM_TABLE_LOAD_thin(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_thin])
++ioctl$DM_TABLE_LOAD_cache(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_cache])
++ioctl$DM_TABLE_LOAD_clone(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_clone])
++ioctl$DM_TABLE_LOAD_era(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_era])
++ioctl$DM_TABLE_LOAD_writecache(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_writecache])
++
++# ==================== STRUCTS ====================
++
++type dm_load_snaporigin dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_snaporigin]
++type dm_load_snapshot dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_snapshot]
++type dm_load_thinpool dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_thinpool]
++type dm_load_thin dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_thin]
++type dm_load_cache dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_cache]
++type dm_load_clone dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_clone]
++type dm_load_era dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_era]
++type dm_load_writecache dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_writecache]
++
++dm_target_snaporigin {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["snapshot-origin", DM_MAX_TYPE_NAME]
++	params		string[dm_params_snaporigin, 64]
++}
++
++dm_target_snapshot {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string[dm_snapshot_types, DM_MAX_TYPE_NAME]
++	params		string[dm_params_snapshot, 64]
++}
++
++dm_target_thinpool {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["thin-pool", DM_MAX_TYPE_NAME]
++	params		string[dm_params_thinpool, 64]
++}
++
++dm_target_thin {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["thin", DM_MAX_TYPE_NAME]
++	params		string[dm_params_thin, 64]
++}
++
++dm_target_cache {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["cache", DM_MAX_TYPE_NAME]
++	params		string[dm_params_cache, 64]
++}
++
++dm_target_clone {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["clone", DM_MAX_TYPE_NAME]
++	params		string[dm_params_clone, 64]
++}
++
++dm_target_era {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["era", DM_MAX_TYPE_NAME]
++	params		string[dm_params_era, 64]
++}
++
++dm_target_writecache {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["writecache", DM_MAX_TYPE_NAME]
++	params		string[dm_params_writecache, 64]
++}
++
++# ==================== FLAGS & PARAMS ====================
++
++dm_params_snaporigin = "1:0", "1:1", "", "1:0 0"
++
++dm_params_snapshot = "1:0 1:1 N 8", "1:0 1:1 P 8", "1:0 1:1 PO 8", "1:0 1:1 N 0", "1:0 1:1 N 1", "1:0 1:1 X 8", "1:0 1:1 N 8 1 discard_zeroes_cow", "1:0 1:1 N 8 1 discard_passdown_origin", "1:0 1:1", "1:0 1:1 N 4294967296"
++
++dm_params_thinpool = "1:0 1:1 128 0", "1:0 1:1 128 32768", "1:0 1:1 64 0", "1:0 1:1 0 0", "1:0 1:1 128 0 1 skip_block_zeroing", "1:0 1:1 128 0 2 ignore_discard no_discard_passdown", "1:0 1:1 128 0 1 read_only", "1:0 1:1 128 0 1 error_if_no_space", "1:0 1:1 4294967295 0", "1:0 1:1", "1:0 1:1 128 0 3 skip_block_zeroing ignore_discard read_only"
++
++dm_params_thin = "1:0 0", "1:0 1", "1:0 0 1:1", "1:0 16777216", "1:0", ""
++
++dm_params_cache = "1:0 1:1 1:2 128 0 default 0", "1:0 1:1 1:2 128 1 writeback smq 0", "1:0 1:1 1:2 128 1 writethrough mq 0", "1:0 1:1 1:2 128 1 passthrough default 0", "1:0 1:1 1:2 0 0 default 0", "1:0 1:1 1:2 128 0 bogus 0", "1:0 1:1 1:2 128 0", "1:0 1:1 1:2 128 1 metadata2 smq 2 migration_threshold 1024", "1:0 1:1 1:2 128 2 writeback metadata2 default 0"
++
++dm_params_clone = "1:0 1:1 1:2 8", "1:0 1:1 1:2 128", "1:0 1:1 1:2 0", "1:0 1:1 1:2 8 1 no_hydration", "1:0 1:1 1:2 8 2 hydration_threshold 1", "1:0 1:1 1:2"
++
++dm_params_era = "1:0 1:1 8", "1:0 1:1 0", "1:0 1:1 128", "1:0 1:1", "1:0 1:1 4294967295"
++
++dm_params_writecache = "s 1:0 1:1 4096 0", "s 1:0 1:1 512 0", "p 1:0 1:1 4096 0", "s 1:0 1:1 0 0", "s 1:0 1:1 4096 2 high_watermark 50", "s 1:0 1:1 4096 2 start_sector 8", "s 1:0 1:1 4096 1 fua", "x 1:0 1:1 4096 0", "s 1:0 1:1"
++
++dm_snapshot_types = "snapshot", "snapshot-merge"
++
++syz_dm_setup$snaporigin(index intptr[0:7], target ptr[in, string["snapshot-origin"]], params ptr[in, string[dm_params_snaporigin]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$snapshot(index intptr[0:7], target ptr[in, string["snapshot"]], params ptr[in, string[dm_params_snapshot]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$thinpool(index intptr[0:7], target ptr[in, string["thin-pool"]], params ptr[in, string[dm_params_thinpool]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$thin(index intptr[0:7], target ptr[in, string["thin"]], params ptr[in, string[dm_params_thin]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$cache(index intptr[0:7], target ptr[in, string["cache"]], params ptr[in, string[dm_params_cache]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$clone(index intptr[0:7], target ptr[in, string["clone"]], params ptr[in, string[dm_params_clone]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$era(index intptr[0:7], target ptr[in, string["era"]], params ptr[in, string[dm_params_era]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$writecache(index intptr[0:7], target ptr[in, string["writecache"]], params ptr[in, string[dm_params_writecache]], sectors flags[dm_target_lengths]) fd_dm
+diff --git a/sys/linux/dev_dm_persistent.txt.const b/sys/linux/dev_dm_persistent.txt.const
+new file mode 100644
+index 0000000..f4f565a
+--- /dev/null
++++ b/sys/linux/dev_dm_persistent.txt.const
+@@ -0,0 +1,5 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++DM_MAX_TYPE_NAME = amd64:16
++DM_TABLE_LOAD = amd64:3241737481
++__NR_ioctl = amd64:16

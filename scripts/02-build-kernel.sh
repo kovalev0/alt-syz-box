@@ -186,6 +186,14 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e CRYPTO_HMAC -e CRYPTO_AUTHENC -e CRYPTO_USER_API_SKCIPHER \
     -e CRYPTO_USER_API_HASH -e CRYPTO_LIB_UTILS
 
+# -- metadata-backed dm targets --------------------
+# The targets that use drivers/md/persistent-data/: snapshot, thin, cache,
+# clone, era and writecache.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e DM_PERSISTENT_DATA -e DM_BIO_PRISON \
+    -e DM_SNAPSHOT -e DM_THIN_PROVISIONING \
+    -e DM_CACHE -e DM_CACHE_SMQ -e DM_CLONE -e DM_ERA -e DM_WRITECACHE
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
