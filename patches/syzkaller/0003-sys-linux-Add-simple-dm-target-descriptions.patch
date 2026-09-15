@@ -1,0 +1,226 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Mon, 7 Sep 2026 10:10:00 +0000
+Subject: [PATCH] sys/linux: add simple dm target descriptions
+
+Constructor grammars for the simple dm targets that remap or fail I/O
+without a metadata device: delay, flakey, dust, striped, unstriped,
+log-writes, ebs, switch, mirror and multipath with its path selectors.
+
+---
+ sys/linux/dev_dm_targets.txt       | 193 +++++++++++++++++++++++++++++
+ sys/linux/dev_dm_targets.txt.const |   5 +
+ 2 files changed, 198 insertions(+)
+ create mode 100644 sys/linux/dev_dm_targets.txt
+ create mode 100644 sys/linux/dev_dm_targets.txt.const
+
+diff --git a/sys/linux/dev_dm_targets.txt b/sys/linux/dev_dm_targets.txt
+new file mode 100644
+index 0000000..a6dc8d1
+--- /dev/null
++++ b/sys/linux/dev_dm_targets.txt
+@@ -0,0 +1,193 @@
++include <linux/ioctl.h>
++include <uapi/linux/dm-ioctl.h>
++
++# ==================== IOCTLS / CALLS ====================
++
++ioctl$DM_TABLE_LOAD_linear(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_linear])
++ioctl$DM_TABLE_LOAD_zero(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_zero])
++ioctl$DM_TABLE_LOAD_error(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_error])
++ioctl$DM_TABLE_LOAD_delay(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_delay])
++ioctl$DM_TABLE_LOAD_flakey(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_flakey])
++ioctl$DM_TABLE_LOAD_dust(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_dust])
++ioctl$DM_TABLE_LOAD_striped(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_striped])
++ioctl$DM_TABLE_LOAD_unstriped(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_unstriped])
++ioctl$DM_TABLE_LOAD_logwrites(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_logwrites])
++ioctl$DM_TABLE_LOAD_ebs(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_ebs])
++ioctl$DM_TABLE_LOAD_switch(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_switch])
++ioctl$DM_TABLE_LOAD_mirror(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_mirror])
++ioctl$DM_TABLE_LOAD_multipath(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_multipath])
++
++# ==================== STRUCTS ====================
++
++type dm_load_linear dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_linear]
++type dm_load_zero dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_zero]
++type dm_load_error dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_error]
++type dm_load_delay dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_delay]
++type dm_load_flakey dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_flakey]
++type dm_load_dust dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_dust]
++type dm_load_striped dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_striped]
++type dm_load_unstriped dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_unstriped]
++type dm_load_logwrites dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_logwrites]
++type dm_load_ebs dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_ebs]
++type dm_load_switch dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_switch]
++type dm_load_mirror dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_mirror]
++type dm_load_multipath dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_multipath]
++
++dm_target_linear {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["linear", DM_MAX_TYPE_NAME]
++	params		string[dm_params_linear, 64]
++}
++
++dm_target_zero {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["zero", DM_MAX_TYPE_NAME]
++	params		string[dm_params_empty, 64]
++}
++
++dm_target_error {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["error", DM_MAX_TYPE_NAME]
++	params		string[dm_params_error, 64]
++}
++
++dm_target_delay {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["delay", DM_MAX_TYPE_NAME]
++	params		string[dm_params_delay, 64]
++}
++
++dm_target_flakey {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["flakey", DM_MAX_TYPE_NAME]
++	params		string[dm_params_flakey, 64]
++}
++
++dm_target_dust {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["dust", DM_MAX_TYPE_NAME]
++	params		string[dm_params_dust, 64]
++}
++
++dm_target_striped {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["striped", DM_MAX_TYPE_NAME]
++	params		string[dm_params_striped, 64]
++}
++
++dm_target_unstriped {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["unstriped", DM_MAX_TYPE_NAME]
++	params		string[dm_params_unstriped, 64]
++}
++
++dm_target_logwrites {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["log-writes", DM_MAX_TYPE_NAME]
++	params		string[dm_params_logwrites, 64]
++}
++
++dm_target_ebs {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["ebs", DM_MAX_TYPE_NAME]
++	params		string[dm_params_ebs, 64]
++}
++
++dm_target_switch {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["switch", DM_MAX_TYPE_NAME]
++	params		string[dm_params_switch, 64]
++}
++
++dm_target_mirror {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["mirror", DM_MAX_TYPE_NAME]
++	params		string[dm_params_mirror, 64]
++}
++
++dm_target_multipath {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["multipath", DM_MAX_TYPE_NAME]
++	params		string[dm_params_multipath, 96]
++}
++
++# ==================== FLAGS & PARAMS ====================
++
++dm_params_linear = "1:0 0", "1:1 0", "1:0 8", "1:2 32768", "1:0 65536", "1:0 18446744073709551615", "/dev/ram0 0", "1:0", "", "1:0 x"
++
++dm_params_empty = ""
++
++dm_params_error = "", "1:0 0", "1:0"
++
++dm_params_delay = "1:0 0 0", "1:0 0 1", "1:0 0 100", "1:0 0 10 1:1 0 20", "1:0 0 10 1:1 0 20 1:2 0 30", "1:0 0 4294967295", "1:0 0", "1:0 0 10 1:1 0"
++
++dm_params_flakey = "1:0 0 1 0", "1:0 0 0 1", "1:0 0 1 1", "1:0 0 0 0", "1:0 0 1 1 1 drop_writes", "1:0 0 1 1 1 error_writes", "1:0 0 1 1 1 error_reads", "1:0 0 1 1 4 corrupt_bio_byte 32 w 1 8", "1:0 0 1 1 4 corrupt_bio_byte 0 r 255 0", "1:0 0 1 1 2 random_read_corrupt 100", "1:0 0 1 1 2 random_write_corrupt 1", "1:0 0 1 1 9 drop_writes", "1:0 0 1 1 6 corrupt_bio_byte 32 w 1 8 error_writes", "1:0 0 1 1 5 corrupt_bio_rw r 0 255 1"
++
++dm_params_dust = "1:0 0 512", "1:0 0 4096", "1:0 0 0", "1:0 0 1", "1:0 0 2147483648", "1:0 0"
++
++dm_params_striped = "1 8 1:0 0", "2 8 1:0 0 1:1 0", "2 1 1:0 0 1:1 0", "4 16 1:0 0 1:1 0 1:2 0 1:3 0", "2 0 1:0 0 1:1 0", "2 8 1:0 0", "0 8", "2 8 1:0 0 1:0 0"
++
++dm_params_unstriped = "2 8 0 1:0 0", "2 8 1 1:0 0", "1 8 0 1:0 0", "2 8 5 1:0 0", "2 0 0 1:0 0", "2 8 0"
++
++dm_params_logwrites = "1:0 1:1", "1:1 1:2", "1:0 1:0", "1:0", ""
++
++dm_params_ebs = "1:0 0 1", "1:0 0 8", "1:0 0 2 8", "1:0 0 0", "1:0 0 1 0", "1:0 0 16 1", "1:0 0"
++
++dm_params_switch = "1 4096 0 1:0 0", "2 4096 0 1:0 0 1:1 0", "1 0 0 1:0 0", "1 1 0 1:0 0", "0 4096 0", "2 4096 0 1:0 0"
++
++dm_params_mirror = "core 1 1024 2 1:0 0 1:1 0", "core 2 1024 sync 2 1:0 0 1:1 0", "core 2 1024 nosync 2 1:0 0 1:1 0", "disk 2 1:2 1024 2 1:0 0 1:1 0", "core 1 0 2 1:0 0 1:1 0", "core 1 1024 1 1:0 0", "core 1 1024 2 1:0 0 1:1 0 1 handle_errors", "bogus 1 1024 2 1:0 0 1:1 0"
++
++dm_params_multipath = "0 0 1 1 round-robin 0 1 1 1:0 1", "0 0 1 1 queue-length 0 1 1 1:0 1", "0 0 1 1 service-time 0 1 1 1:0 1", "1 queue_if_no_path 0 1 1 round-robin 0 1 1 1:0 1", "0 0 0 0", "0 0 1 1 round-robin 0 2 1 1:0 1 1:1 1", "0 0 1 1 bogus-sel 0 1 1 1:0 1", "2 retain_attached_hw_handler queue_if_no_path 0 1 1 round-robin 0 1 1 1:0 1", "0 0 1 1 historical-service-time 0 1 1 1:0 1", "0 0 1 1 io-affinity 0 1 1 1:0 1", "0 0 1 1 io-affinity 1 3 1 1:0 1"
++
++syz_dm_setup$linear(index intptr[0:7], target ptr[in, string["linear"]], params ptr[in, string[dm_params_linear]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$zero(index intptr[0:7], target ptr[in, string["zero"]], params ptr[in, string[dm_params_empty]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$error(index intptr[0:7], target ptr[in, string["error"]], params ptr[in, string[dm_params_error]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$delay(index intptr[0:7], target ptr[in, string["delay"]], params ptr[in, string[dm_params_delay]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$flakey(index intptr[0:7], target ptr[in, string["flakey"]], params ptr[in, string[dm_params_flakey]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$dust(index intptr[0:7], target ptr[in, string["dust"]], params ptr[in, string[dm_params_dust]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$striped(index intptr[0:7], target ptr[in, string["striped"]], params ptr[in, string[dm_params_striped]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$unstriped(index intptr[0:7], target ptr[in, string["unstriped"]], params ptr[in, string[dm_params_unstriped]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$logwrites(index intptr[0:7], target ptr[in, string["log-writes"]], params ptr[in, string[dm_params_logwrites]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$ebs(index intptr[0:7], target ptr[in, string["ebs"]], params ptr[in, string[dm_params_ebs]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$switch(index intptr[0:7], target ptr[in, string["switch"]], params ptr[in, string[dm_params_switch]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$mirror(index intptr[0:7], target ptr[in, string["mirror"]], params ptr[in, string[dm_params_mirror]], sectors flags[dm_target_lengths]) fd_dm
++syz_dm_setup$multipath(index intptr[0:7], target ptr[in, string["multipath"]], params ptr[in, string[dm_params_multipath]], sectors flags[dm_target_lengths]) fd_dm
+diff --git a/sys/linux/dev_dm_targets.txt.const b/sys/linux/dev_dm_targets.txt.const
+new file mode 100644
+index 0000000..f4f565a
+--- /dev/null
++++ b/sys/linux/dev_dm_targets.txt.const
+@@ -0,0 +1,5 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++DM_MAX_TYPE_NAME = amd64:16
++DM_TABLE_LOAD = amd64:3241737481
++__NR_ioctl = amd64:16

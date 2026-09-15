@@ -168,6 +168,13 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     --set-val BLK_DEV_RAM_COUNT 8 \
     --set-val BLK_DEV_RAM_SIZE 32768
 
+# -- simple dm targets -----------------------------
+# Targets that remap or fail I/O without a metadata device.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e DM_DELAY -e DM_FLAKEY -e DM_DUST -e DM_UNSTRIPED \
+    -e DM_LOG_WRITES -e DM_EBS -e DM_SWITCH -e DM_MIRROR \
+    -e DM_MULTIPATH -e DM_MULTIPATH_QL -e DM_MULTIPATH_ST
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
