@@ -1,0 +1,255 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Mon, 19 Oct 2026 10:55:00 +0000
+Subject: [PATCH] sys/linux, executor: add bcache descriptions and
+ syz_bcache_setup
+
+Adds bcache descriptions and syz_bcache_setup, which writes a valid
+superblock and registers a device so a cache set runs and a backing device
+attaches.
+---
+ executor/common_linux.h        | 107 +++++++++++++++++++++++++++++++++
+ pkg/vminfo/linux_syscalls.go   |   1 +
+ sys/linux/dev_bcache.txt       |  84 ++++++++++++++++++++++++++
+ sys/linux/dev_bcache.txt.const |  11 ++++
+ 4 files changed, 203 insertions(+)
+ create mode 100644 sys/linux/dev_bcache.txt
+ create mode 100644 sys/linux/dev_bcache.txt.const
+
+diff --git a/executor/common_linux.h b/executor/common_linux.h
+index ef97356..494e9ef 100644
+--- a/executor/common_linux.h
++++ b/executor/common_linux.h
+@@ -2721,6 +2721,113 @@ static long syz_dmz_io(volatile long a0, volatile long a1, volatile long a2)
+ }
+ #endif
+ 
++#if SYZ_EXECUTOR || __NR_syz_bcache_setup
++#include <fcntl.h>
++#include <string.h>
++#include <unistd.h>
++
++// Build a valid bcache superblock (correct magic + crc64, verified against
++// make-bcache) and register it, so a cache set runs and a backing device
++// attaches. type 0 = cache, type 1 = backing; returns /dev/bcache0 fd for type 1.
++static const unsigned char syz_bcache_magic[16] = {
++    0xc6, 0x85, 0x73, 0xf6, 0x4e, 0x1a, 0x45, 0xca,
++    0x82, 0x65, 0xf5, 0x7f, 0x48, 0xba, 0x6d, 0x81};
++static const unsigned char syz_bcache_set_uuid[16] = {
++    0x53, 0x59, 0x5a, 0x62, 0x63, 0x61, 0x63, 0x68,
++    0x65, 0x53, 0x45, 0x54, 0x30, 0x30, 0x30, 0x31};
++
++static uint64 syz_bch_crc64(const unsigned char* p, unsigned len)
++{
++	uint64 crc = ~(uint64)0;
++	unsigned i;
++	int b;
++	for (i = 0; i < len; i++) {
++		crc ^= (uint64)p[i] << 56;
++		for (b = 0; b < 8; b++)
++			crc = (crc & ((uint64)1 << 63)) ? ((crc << 1) ^ 0x42F0E1EBA9EA3693ULL) : (crc << 1);
++	}
++	return crc ^ ~(uint64)0;
++}
++
++static void syz_bcache_p64(unsigned char* p, uint64 v)
++{
++	int i;
++	for (i = 0; i < 8; i++)
++		p[i] = (v >> (8 * i)) & 0xff;
++}
++
++static void syz_bcache_p16(unsigned char* p, uint16 v)
++{
++	p[0] = v & 0xff;
++	p[1] = (v >> 8) & 0xff;
++}
++
++static long syz_bcache_setup(volatile long a0, volatile long a1, volatile long a2, volatile long a3)
++{
++	unsigned dev = (unsigned)a0 & 7;
++	int type = (int)a1 & 1;
++	uint64 mode = (uint64)a2 & 7;
++	char node[32];
++	unsigned char sb[4096];
++	long long size;
++	uint64 bucket = 1024, nbuckets;
++	int fd, rfd;
++
++	snprintf(node, sizeof(node), "/dev/ram%u", dev);
++	fd = open(node, O_RDWR);
++	if (fd == -1)
++		return -1;
++	size = lseek(fd, 0, SEEK_END);
++	if (size <= 4096 * 2) {
++		close(fd);
++		return -1;
++	}
++	nbuckets = (uint64)(size >> 9) / bucket;
++
++	memset(sb, 0, sizeof(sb));
++	syz_bcache_p64(sb + 8, 8);
++	memcpy(sb + 24, syz_bcache_magic, 16);
++	sb[40] = 'S';
++	sb[41] = 'Z';
++	sb[42] = type ? 'B' : 'C';
++	sb[43] = (unsigned char)dev;
++	memcpy(sb + 56, syz_bcache_set_uuid, 16);
++	if (type == 0) {
++		syz_bcache_p64(sb + 16, 0);
++		syz_bcache_p64(sb + 184, nbuckets);
++		syz_bcache_p16(sb + 192, 8);
++		syz_bcache_p16(sb + 194, (uint16)bucket);
++		syz_bcache_p16(sb + 196, 1);
++		syz_bcache_p16(sb + 198, 0);
++		syz_bcache_p16(sb + 204, 1);
++	} else {
++		syz_bcache_p64(sb + 16, 1);
++		syz_bcache_p64(sb + 104, mode);
++		syz_bcache_p16(sb + 192, 8);
++		syz_bcache_p16(sb + 194, (uint16)bucket);
++	}
++	syz_bcache_p64(sb + 0, syz_bch_crc64(sb + 8, 200));
++
++	if (pwrite(fd, sb, sizeof(sb), 4096) != (long)sizeof(sb)) {
++		close(fd);
++		return -1;
++	}
++	close(fd);
++
++	rfd = open("/sys/fs/bcache/register", O_WRONLY);
++	if (rfd == -1)
++		return -1;
++	if (write(rfd, node, strlen(node)) < 0) {
++		// ignore: EEXIST/EINVAL are the interesting error paths in register_bcache
++	}
++	close(rfd);
++
++	if (type == 1)
++		return open("/dev/bcache0", O_RDWR);
++	return 0;
++}
++#endif
++
+ #if SYZ_EXECUTOR || __NR_syz_open_dev
+ #include <fcntl.h>
+ #include <string.h>
+diff --git a/pkg/vminfo/linux_syscalls.go b/pkg/vminfo/linux_syscalls.go
+index 2cd5e95..420487e 100644
+--- a/pkg/vminfo/linux_syscalls.go
++++ b/pkg/vminfo/linux_syscalls.go
+@@ -73,6 +73,7 @@ var linuxSyscallChecks = map[string]func(*checkContext, *prog.Syscall) string{
+ 	"syz_dm_setup":                  alwaysSupported,
+ 	"syz_dmz_io":                    alwaysSupported,
+ 	"syz_md_setup":              alwaysSupported,
++	"syz_bcache_setup":              alwaysSupported,
+ 	"syz_execute_func":              alwaysSupported,
+ 	"syz_emit_ethernet":             linuxNetInjectionSupported,
+ 	"syz_extract_tcp_res":           linuxNetInjectionSupported,
+diff --git a/sys/linux/dev_bcache.txt b/sys/linux/dev_bcache.txt
+new file mode 100644
+index 0000000..c79a9bf
+--- /dev/null
++++ b/sys/linux/dev_bcache.txt
+@@ -0,0 +1,84 @@
++include <uapi/linux/fcntl.h>
++include <uapi/linux/fs.h>
++
++# ==================== RESOURCES ====================
++
++resource fd_bcache_ctl[fd]
++resource fd_bcache_bdev[fd]
++resource fd_bcache_sysfs[fd]
++resource fd_bcache[fd]
++
++# ==================== IOCTLS / CALLS ====================
++
++syz_bcache_setup(dev intptr[0:7], type intptr[0:1], mode intptr[0:7], flush const[0]) fd_bcache
++
++read$bcache(fd fd_bcache, buf ptr[out, array[int8]], count bytesize[buf])
++write$bcache(fd fd_bcache, buf ptr[in, array[int8]], count bytesize[buf])
++pread64$bcache(fd fd_bcache, buf ptr[out, array[int8]], count bytesize[buf], pos intptr)
++pwrite64$bcache(fd fd_bcache, buf ptr[in, array[int8]], count bytesize[buf], pos intptr)
++fsync$bcache(fd fd_bcache)
++ioctl$bcache_BLKFLSBUF(fd fd_bcache, cmd const[BLKFLSBUF])
++
++openat$bcache_register(fd const[AT_FDCWD], file ptr[in, string["/sys/fs/bcache/register"]], flags flags[open_flags], mode const[0]) fd_bcache_ctl
++openat$bcache_register_quiet(fd const[AT_FDCWD], file ptr[in, string["/sys/fs/bcache/register_quiet"]], flags flags[open_flags], mode const[0]) fd_bcache_ctl
++openat$bcache_pendings_cleanup(fd const[AT_FDCWD], file ptr[in, string["/sys/fs/bcache/pendings_cleanup"]], flags flags[open_flags], mode const[0]) fd_bcache_ctl
++
++write$bcache_register(fd fd_bcache_ctl, data ptr[in, string[bcache_reg_devs]], len bytesize[data])
++write$bcache_register_quiet(fd fd_bcache_ctl, data ptr[in, string[bcache_reg_devs]], len bytesize[data])
++write$bcache_pendings_cleanup(fd fd_bcache_ctl, data ptr[in, string["1"]], len bytesize[data])
++
++# ==================== FLAGS & PARAMS ====================
++
++bcache_reg_devs = "/dev/ram0", "/dev/ram1", "/dev/ram2", "/dev/ram3", "/dev/sda", ""
++
++openat$bcache_sysfs(fd const[AT_FDCWD], file ptr[in, string[bcache_sysfs_files]], flags flags[open_flags], mode const[0]) fd_bcache_sysfs
++read$bcache_sysfs(fd fd_bcache_sysfs, buf ptr[out, array[int8]], count bytesize[buf])
++write$bcache_sysfs(fd fd_bcache_sysfs, data ptr[in, string[bcache_sysfs_vals]], len bytesize[data])
++
++bcache_sysfs_files = "/sys/module/bcache/parameters/latency_warn_ms", "/sys/module/bcache/parameters/bch_cutoff_writeback", "/sys/module/bcache/parameters/bch_cutoff_writeback_sync", "/sys/block/bcache0/bcache/cache_mode", "/sys/block/bcache0/bcache/writeback_running", "/sys/block/bcache0/bcache/writeback_percent", "/sys/block/bcache0/bcache/writeback_delay", "/sys/block/bcache0/bcache/writeback_rate", "/sys/block/bcache0/bcache/writeback_rate_update_seconds", "/sys/block/bcache0/bcache/writeback_rate_minimum", "/sys/block/bcache0/bcache/sequential_cutoff", "/sys/block/bcache0/bcache/readahead_cache_policy", "/sys/block/bcache0/bcache/label", "/sys/block/bcache0/bcache/attach", "/sys/block/bcache0/bcache/detach", "/sys/block/bcache0/bcache/stop", "/sys/block/bcache0/bcache/clear_stats", "/sys/block/bcache0/bcache/running", "/sys/block/bcache0/bcache/dirty_data"
++
++bcache_sysfs_vals = "writeback", "writethrough", "writearound", "none", "0", "1", "40", "100", "1000000", "all", "meta", "10", "-1", "3000000000000000000"
++
++openat$bcache_bdev(fd const[AT_FDCWD], file ptr[in, string[bcache_reg_devs]], flags flags[open_flags], mode const[0]) fd_bcache_bdev
++pwrite64$bcache_sb(fd fd_bcache_bdev, buf ptr[in, bcache_sb], count bytesize[buf], pos const[4096])
++
++# ==================== STRUCTS ====================
++
++bcache_sb {
++	csum		int64
++	sb_offset	const[8, int64]
++	version		flags[bcache_sb_versions, int64]
++	magic0		const[0xc6, int8]
++	magic1		const[0x85, int8]
++	magic2		const[0x73, int8]
++	magic3		const[0xf6, int8]
++	magic4		const[0x4e, int8]
++	magic5		const[0x1a, int8]
++	magic6		const[0x45, int8]
++	magic7		const[0xca, int8]
++	magic8		const[0x82, int8]
++	magic9		const[0x65, int8]
++	magic10		const[0xf5, int8]
++	magic11		const[0x7f, int8]
++	magic12		const[0x48, int8]
++	magic13		const[0xba, int8]
++	magic14		const[0x6d, int8]
++	magic15		const[0x81, int8]
++	uuid		array[int8, 16]
++	set_uuid	array[int8, 16]
++	label		array[int8, 32]
++	flags		int64
++	seq		int64
++	pad		array[const[0, int64], 8]
++	nbuckets	int64[0:0x100000]
++	block_size	int16[0:16]
++	bucket_size	int16[0:2048]
++	nr_in_set	int16[0:8]
++	nr_this_dev	int16[0:8]
++	last_mount	int32
++	first_bucket	int16[0:16]
++	njournal	int16[0:256]
++	d		array[const[0, int64], 256]
++} [packed]
++
++bcache_sb_versions = 0, 1, 3, 4, 5, 6, 2, 99
+diff --git a/sys/linux/dev_bcache.txt.const b/sys/linux/dev_bcache.txt.const
+new file mode 100644
+index 0000000..bbbc086
+--- /dev/null
++++ b/sys/linux/dev_bcache.txt.const
+@@ -0,0 +1,11 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AT_FDCWD = amd64:18446744073709551516
++BLKFLSBUF = amd64:4705
++__NR_fsync = amd64:74
++__NR_ioctl = amd64:16
++__NR_openat = amd64:257
++__NR_pread64 = amd64:17
++__NR_pwrite64 = amd64:18
++__NR_read = amd64:0
++__NR_write = amd64:1

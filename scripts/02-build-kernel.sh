@@ -213,6 +213,11 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     -e DM_VDO
 
+# -- bcache ----------------------------------------
+# Block-layer cache, driven through sysfs.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e BCACHE
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
