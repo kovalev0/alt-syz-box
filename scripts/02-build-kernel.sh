@@ -194,6 +194,12 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e DM_SNAPSHOT -e DM_THIN_PROVISIONING \
     -e DM_CACHE -e DM_CACHE_SMQ -e DM_CLONE -e DM_ERA -e DM_WRITECACHE
 
+# -- MD software RAID ------------------------------
+# The MD RAID personalities and the dm-raid target on top of them.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e BLK_DEV_MD -e MD_AUTODETECT -e MD_BITMAP_FILE \
+    -e MD_RAID0 -e MD_RAID1 -e MD_RAID10 -e MD_RAID456 -e DM_RAID
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \

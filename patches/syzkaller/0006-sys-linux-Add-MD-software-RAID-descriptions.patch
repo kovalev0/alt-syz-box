@@ -1,0 +1,297 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Mon, 28 Sep 2026 10:40:00 +0000
+Subject: [PATCH] sys/linux, executor: add MD software RAID descriptions and
+ syz_md_setup
+
+Adds the MD software RAID ioctl ABI, the /sys/block/md0/md/ attributes and
+the dm-raid target, plus syz_md_setup, which assembles a legacy array over
+ram disks so a RAID personality actually runs.
+
+---
+ executor/common_linux.h      |  75 +++++++++++++++++++
+ pkg/vminfo/linux_syscalls.go |   1 +
+ sys/linux/dev_md.txt         | 140 +++++++++++++++++++++++++++++++++++
+ sys/linux/dev_md.txt.const   |  28 +++++++
+ 4 files changed, 244 insertions(+)
+ create mode 100644 sys/linux/dev_md.txt
+ create mode 100644 sys/linux/dev_md.txt.const
+
+diff --git a/executor/common_linux.h b/executor/common_linux.h
+index 3831598..fcaee72 100644
+--- a/executor/common_linux.h
++++ b/executor/common_linux.h
+@@ -33,6 +33,81 @@
+ }
+ #endif
+ 
++#if SYZ_EXECUTOR || __NR_syz_md_setup
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include <sys/stat.h>
++#include <sys/sysmacros.h>
++#include <unistd.h>
++
++// Assemble a legacy (non-persistent) MD array over ram disks via the ioctl path
++// SET_ARRAY_INFO + ADD_NEW_DISK + RUN_ARRAY (what "mdadm --build" does), so md.c
++// and the personality (raid0/raid1/raid10/...) run() are reached. Random fuzzing
++// rarely emits this exact stateful sequence on its own.
++struct syz_mdu_array_info {
++	int major_version, minor_version, patch_version;
++	unsigned int ctime;
++	int level, size, nr_disks, raid_disks, md_minor, not_persistent;
++	unsigned int utime;
++	int state, active_disks, working_disks, failed_disks, spare_disks;
++	int layout, chunk_size;
++};
++struct syz_mdu_disk_info {
++	int number, major, minor, raid_disk, state;
++};
++struct syz_mdu_param {
++	int personality, chunk_size, max_fault;
++};
++#define SYZ_SET_ARRAY_INFO _IOW(9, 0x23, struct syz_mdu_array_info)
++#define SYZ_ADD_NEW_DISK   _IOW(9, 0x21, struct syz_mdu_disk_info)
++#define SYZ_RUN_ARRAY      _IOW(9, 0x30, struct syz_mdu_param)
++
++static long syz_md_setup(volatile long a0, volatile long a1, volatile long a2, volatile long a3)
++{
++	int level = (int)a0;
++	int ndisks = (int)a1;
++	int i, fd;
++	struct syz_mdu_array_info ai;
++	struct syz_mdu_param param;
++
++	if (ndisks < 1)
++		ndisks = 1;
++	if (ndisks > 6)
++		ndisks = 6;
++	mknod("/dev/md0", S_IFBLK | 0600, makedev(9, 0));
++	fd = open("/dev/md0", O_RDWR);
++	if (fd == -1)
++		return -1;
++
++	memset(&ai, 0, sizeof(ai));
++	ai.major_version = 0;
++	ai.minor_version = 0;
++	ai.level = level;
++	ai.raid_disks = ndisks;
++	ai.nr_disks = ndisks;
++	ai.md_minor = 0;
++	ai.not_persistent = 1;
++	ai.size = (int)a3;
++	ai.chunk_size = (int)a2 * 1024;
++	ioctl(fd, SYZ_SET_ARRAY_INFO, &ai);
++
++	for (i = 0; i < ndisks; i++) {
++		struct syz_mdu_disk_info di;
++		memset(&di, 0, sizeof(di));
++		di.number = i;
++		di.major = 1;    // ram disk major
++		di.minor = i;    // /dev/ram<i>
++		di.raid_disk = i;
++		di.state = (1 << 1) | (1 << 2); // MD_DISK_ACTIVE | MD_DISK_SYNC
++		ioctl(fd, SYZ_ADD_NEW_DISK, &di);
++	}
++
++	memset(&param, 0, sizeof(param));
++	ioctl(fd, SYZ_RUN_ARRAY, &param);
++	return fd;
++}
++#endif
++
+ #if SYZ_EXECUTOR || __NR_syz_open_dev
+ #include <fcntl.h>
+ #include <string.h>
+diff --git a/pkg/vminfo/linux_syscalls.go b/pkg/vminfo/linux_syscalls.go
+index e9291b6..0ca7f6f 100644
+--- a/pkg/vminfo/linux_syscalls.go
++++ b/pkg/vminfo/linux_syscalls.go
+@@ -22,6 +22,7 @@
+ 	"syz_open_procfs":               linuxSyzOpenProcfsSupported,
+ 	"syz_open_pts":                  alwaysSupported,
+ 	"syz_dm_setup":                  alwaysSupported,
++	"syz_md_setup":              alwaysSupported,
+ 	"syz_execute_func":              alwaysSupported,
+ 	"syz_emit_ethernet":             linuxNetInjectionSupported,
+ 	"syz_extract_tcp_res":           linuxNetInjectionSupported,
+diff --git a/sys/linux/dev_md.txt b/sys/linux/dev_md.txt
+new file mode 100644
+index 0000000..a394723
+--- /dev/null
++++ b/sys/linux/dev_md.txt
+@@ -0,0 +1,140 @@
++include <linux/fcntl.h>
++include <linux/major.h>
++include <uapi/linux/dm-ioctl.h>
++include <uapi/linux/raid/md_u.h>
++
++# ==================== RESOURCES ====================
++
++resource fd_md[fd_block]
++resource fd_md_sysfs[fd]
++
++# ==================== IOCTLS / CALLS ====================
++
++openat$md_dev(fd const[AT_FDCWD], file ptr[in, string["/dev/md0"]], flags flags[open_flags], mode const[0]) fd_md
++
++ioctl$RAID_VERSION(fd fd_md, cmd const[RAID_VERSION], arg ptr[out, mdu_version])
++ioctl$GET_ARRAY_INFO(fd fd_md, cmd const[GET_ARRAY_INFO], arg ptr[out, mdu_array_info])
++ioctl$GET_DISK_INFO(fd fd_md, cmd const[GET_DISK_INFO], arg ptr[inout, mdu_disk_info])
++ioctl$GET_BITMAP_FILE(fd fd_md, cmd const[GET_BITMAP_FILE], arg ptr[out, array[int8, 4096]])
++
++ioctl$SET_ARRAY_INFO(fd fd_md, cmd const[SET_ARRAY_INFO], arg ptr[in, mdu_array_info])
++ioctl$SET_ARRAY_INFO_null(fd fd_md, cmd const[SET_ARRAY_INFO], arg const[0])
++
++ioctl$ADD_NEW_DISK(fd fd_md, cmd const[ADD_NEW_DISK], arg ptr[in, mdu_disk_info])
++
++ioctl$HOT_ADD_DISK(fd fd_md, cmd const[HOT_ADD_DISK], arg flags[md_devnos])
++ioctl$HOT_REMOVE_DISK(fd fd_md, cmd const[HOT_REMOVE_DISK], arg flags[md_devnos])
++ioctl$SET_DISK_FAULTY(fd fd_md, cmd const[SET_DISK_FAULTY], arg flags[md_devnos])
++
++ioctl$RUN_ARRAY(fd fd_md, cmd const[RUN_ARRAY], arg ptr[in, mdu_param])
++ioctl$STOP_ARRAY(fd fd_md, cmd const[STOP_ARRAY], arg const[0])
++ioctl$STOP_ARRAY_RO(fd fd_md, cmd const[STOP_ARRAY_RO], arg const[0])
++ioctl$RESTART_ARRAY_RW(fd fd_md, cmd const[RESTART_ARRAY_RW], arg const[0])
++ioctl$CLEAR_ARRAY(fd fd_md, cmd const[CLEAR_ARRAY], arg const[0])
++ioctl$PROTECT_ARRAY(fd fd_md, cmd const[PROTECT_ARRAY], arg const[0])
++ioctl$UNPROTECT_ARRAY(fd fd_md, cmd const[UNPROTECT_ARRAY], arg const[0])
++ioctl$CLUSTERED_DISK_NACK(fd fd_md, cmd const[CLUSTERED_DISK_NACK], arg const[0])
++ioctl$RAID_AUTORUN(fd fd_md, cmd const[RAID_AUTORUN], arg const[0])
++
++ioctl$SET_BITMAP_FILE(fd fd_md, cmd const[SET_BITMAP_FILE], arg fd)
++ioctl$SET_BITMAP_FILE_none(fd fd_md, cmd const[SET_BITMAP_FILE], arg const[0xffffffffffffffff])
++
++# ==================== STRUCTS ====================
++
++mdu_version {
++	major		int32
++	minor		int32
++	patchlevel	int32
++}
++
++mdu_array_info {
++	major_version	flags[md_sb_versions, int32]
++	minor_version	int32[0:2]
++	patch_version	int32[0:2]
++	ctime		int32
++	level		flags[md_levels, int32]
++	size		flags[md_sizes, int32]
++	nr_disks	int32[0:8]
++	raid_disks	int32[0:8]
++	md_minor	int32[0:4]
++	not_persistent	int32[0:1]
++	utime		int32
++	state		flags[md_sb_states, int32]
++	active_disks	int32[0:8]
++	working_disks	int32[0:8]
++	failed_disks	int32[0:8]
++	spare_disks	int32[0:8]
++	layout		flags[md_layouts, int32]
++	chunk_size	flags[md_chunk_sizes, int32]
++}
++
++mdu_disk_info {
++	number		int32[0:8]
++	major		flags[md_disk_majors, int32]
++	minor		int32[0:8]
++	raid_disk	int32[0:8]
++	state		flags[md_disk_states, int32]
++}
++
++mdu_param {
++	personality	int32[0:16]
++	chunk_size	flags[md_chunk_sizes, int32]
++	max_fault	int32[0:4]
++}
++
++# ==================== FLAGS & PARAMS ====================
++
++md_sb_versions = 0, 1, 2, 90, 4294967295
++
++md_levels = 0, 1, 4, 5, 6, 10, 18446744073709551615, 18446744073709551612, 18446744073708551616
++
++md_sizes = 0, 1, 64, 1024, 32768, 65536, 2147483647
++
++md_chunk_sizes = 0, 512, 4096, 65536, 524288, 1, 2147483647
++
++md_layouts = 0, 1, 2, 3, 4, 5, 257, 258, 65537, 131073, 2147483647
++
++md_sb_states = 1, 2, 256, 512
++
++md_disk_majors = 1, 7, 0, 259
++
++md_disk_states = 1, 2, 4, 8, 16, 32, 512, 1024, 262144
++
++md_devnos = 256, 257, 258, 259, 260, 1792, 1793, 0
++
++openat$md_sysfs(fd const[AT_FDCWD], file ptr[in, string[md_sysfs_files]], flags flags[open_flags], mode const[0]) fd_md_sysfs
++read$md_sysfs(fd fd_md_sysfs, buf ptr[out, array[int8]], count bytesize[buf])
++write$md_sysfs(fd fd_md_sysfs, buf ptr[in, string[md_sysfs_values]], count bytesize[buf])
++
++md_sysfs_files = "/sys/block/md0/md/level", "/sys/block/md0/md/raid_disks", "/sys/block/md0/md/chunk_size", "/sys/block/md0/md/component_size", "/sys/block/md0/md/layout", "/sys/block/md0/md/resync_start", "/sys/block/md0/md/metadata_version", "/sys/block/md0/md/new_dev", "/sys/block/md0/md/safe_mode_delay", "/sys/block/md0/md/array_state", "/sys/block/md0/md/array_size", "/sys/block/md0/md/sync_action", "/sys/block/md0/md/sync_speed_min", "/sys/block/md0/md/sync_speed_max", "/sys/block/md0/md/sync_force_parallel", "/sys/block/md0/md/sync_completed", "/sys/block/md0/md/suspend_lo", "/sys/block/md0/md/suspend_hi", "/sys/block/md0/md/reshape_position", "/sys/block/md0/md/reshape_direction", "/sys/block/md0/md/consistency_policy", "/sys/block/md0/md/degraded", "/sys/block/md0/md/uuid", "/sys/block/md0/md/serialize_policy", "/sys/block/md0/md/fail_last_dev", "/sys/block/md0/md/bitmap/location", "/sys/block/md0/md/bitmap/chunksize", "/sys/block/md0/md/bitmap/time_base", "/sys/block/md0/md/bitmap/backlog", "/sys/block/md0/md/bitmap/max_backlog_used", "/sys/block/md0/md/bitmap/metadata", "/sys/block/md0/md/bitmap/can_clear", "/sys/block/md0/md/bitmap/space"
++
++md_sysfs_values = "0", "1", "-1", "none", "clear", "inactive", "readonly", "read-auto", "clean", "active", "write_pending", "active-idle", "broken", "idle", "frozen", "resync", "recover", "check", "repair", "reshape", "backwards", "forwards", "internal", "external", "external:-dev", "external:/dev/ram0", "+8", "-8", "4096", "65536", "18446744073709551615", "2147483647", "9:0", "1.2", "0.90", "unknown", "", "                    ", "0 0", "raid0", "raid1", "raid5", "raid10", "linear"
++
++ioctl$DM_TABLE_LOAD_raid(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_raid])
++type dm_load_raid dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_raid]
++dm_target_raid {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["raid", DM_MAX_TYPE_NAME]
++	params		string[dm_params_raid, 96]
++}
++dm_params_raid = "raid0 1 64 2 - 1:0 - 1:1", "raid1 1 2 2 - 1:0 - 1:1", "raid1 3 2 sync region_size 1024 2 - 1:0 - 1:1", "raid5_ls 1 64 3 - 1:0 - 1:1 - 1:2", "raid6_zr 1 64 4 - 1:0 - 1:1 - 1:2 - 1:3", "raid10 1 64 4 - 1:0 - 1:1 - 1:2 - 1:3", "raid4 1 0 3 - 1:0 - 1:1 - 1:2", "bogus 1 64 2 - 1:0 - 1:1", "raid1 1 2 0"
++
++syz_md_setup(level intptr[0:10], ndisks intptr[1:6], chunk_kb intptr[0:1024], size_kb intptr[0:65536]) fd_md
++
++syz_dm_setup$raid(index intptr[0:7], target ptr[in, string["raid"]], params ptr[in, string[dm_params_raid]], sectors flags[dm_target_lengths]) fd_dm
++
++type dm_load_raidj dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_raidj]
++dm_target_raidj {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["raid", DM_MAX_TYPE_NAME]
++	params		string[dm_params_raidj, 96]
++}
++ioctl$DM_TABLE_LOAD_raidj(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_raidj])
++syz_dm_setup$raidj(index intptr[0:7], target ptr[in, string["raid"]], params ptr[in, string[dm_params_raidj]], sectors flags[dm_target_lengths]) fd_dm
++dm_params_raidj = "raid5_ls 3 64 journal_dev 1:6 3 - 1:0 - 1:1 - 1:2", "raid5_ls 2 64 ppl 3 - 1:0 - 1:1 - 1:2", "raid6_nc 3 64 journal_dev 1:6 4 - 1:0 - 1:1 - 1:2 - 1:3", "raid1 3 0 write_mostly 0 2 - 1:0 - 1:1", "raid1 3 0 max_write_behind 4 2 - 1:0 - 1:1", "raid5_ls 3 64 delta_disks 1 3 - 1:0 - 1:1 - 1:2", "raid5_rs 3 64 data_offset 2048 3 - 1:0 - 1:1 - 1:2", "raid5_la 1 64 3 - 1:0 - 1:1 - 1:2"
+diff --git a/sys/linux/dev_md.txt.const b/sys/linux/dev_md.txt.const
+new file mode 100644
+index 0000000..b3245fe
+--- /dev/null
++++ b/sys/linux/dev_md.txt.const
+@@ -0,0 +1,28 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++ADD_NEW_DISK = amd64:1075054881
++AT_FDCWD = amd64:18446744073709551516
++CLEAR_ARRAY = amd64:2336
++CLUSTERED_DISK_NACK = amd64:2357
++DM_MAX_TYPE_NAME = amd64:16
++DM_TABLE_LOAD = amd64:3241737481
++GET_ARRAY_INFO = amd64:2152204561
++GET_BITMAP_FILE = amd64:2415921429
++GET_DISK_INFO = amd64:2148796690
++HOT_ADD_DISK = amd64:2344
++HOT_REMOVE_DISK = amd64:2338
++PROTECT_ARRAY = amd64:2343
++RAID_AUTORUN = amd64:2324
++RAID_VERSION = amd64:2148272400
++RESTART_ARRAY_RW = amd64:2356
++RUN_ARRAY = amd64:1074530608
++SET_ARRAY_INFO = amd64:1078462755
++SET_BITMAP_FILE = amd64:1074006315
++SET_DISK_FAULTY = amd64:2345
++STOP_ARRAY = amd64:2354
++STOP_ARRAY_RO = amd64:2355
++UNPROTECT_ARRAY = amd64:2342
++__NR_ioctl = amd64:16
++__NR_openat = amd64:257
++__NR_read = amd64:0
++__NR_write = amd64:1

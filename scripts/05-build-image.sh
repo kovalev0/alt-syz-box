@@ -93,6 +93,33 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin root --keep-baud 115200,38400,9600 %I $TERM
 AUTOLOGIN
 
+# 5b. Instantiate an md array at boot.
+#
+# md_mod's new_array parameter creates one without mdadm and without the legacy
+# open-triggered probe, so /sys/block/md0/md/ exists before the machine check --
+# which is what openat$md_sysfs needs, and the bitmap/ attributes under it are
+# the only way into md-bitmap.c. /dev/md0 follows from add_disk() via devtmpfs.
+echo "Installing md boot unit..."
+sudo tee "$IMAGE_MOUNT_DIR/etc/systemd/system/syz-md-setup.service" > /dev/null << 'MDSETUP'
+[Unit]
+Description=Instantiate md0 for the syzkaller machine check
+After=local-fs.target systemd-udevd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'modprobe md_mod 2>/dev/null || true'
+ExecStart=/bin/sh -c 'echo md0 > /sys/module/md_mod/parameters/new_array 2>/dev/null || true'
+ExecStart=/bin/sh -c 'test -b /dev/md0 || mknod /dev/md0 b 9 0 2>/dev/null || true'
+ExecStart=/bin/sh -c 'ls -d /sys/block/md0/md 2>/dev/null || echo "syz-md-setup: /sys/block/md0/md missing" >&2'
+
+[Install]
+WantedBy=multi-user.target
+MDSETUP
+sudo mkdir -p "$IMAGE_MOUNT_DIR/etc/systemd/system/multi-user.target.wants"
+sudo ln -sf /etc/systemd/system/syz-md-setup.service \
+    "$IMAGE_MOUNT_DIR/etc/systemd/system/multi-user.target.wants/syz-md-setup.service"
+
 # 6. Install packages to image
 if [ -n "$PACKAGES_TO_INSTALL" ]; then
     echo "Installing packages ($PACKAGES_TO_INSTALL) via chroot..."
