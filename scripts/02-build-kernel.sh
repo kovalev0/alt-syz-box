@@ -207,6 +207,12 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e BLK_DEV_ZONED -e DM_ZONED \
     -e BLK_DEV_NULL_BLK -e BLK_DEV_NULL_BLK_FAULT_INJECTION
 
+# -- dm-vdo ----------------------------------------
+# Inline dedup, compression and thin provisioning; olddefconfig pulls in
+# DM_BUFIO and LZ4.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e DM_VDO
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
