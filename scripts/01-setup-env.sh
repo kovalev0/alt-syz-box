@@ -12,14 +12,14 @@
 export TERM="xterm-256color"
 
 # General kernel local verion
-export KERNEL_LOCALVERSION="alt-syz-box-drivers_md_dm"
+export KERNEL_LOCALVERSION="alt-syz-box-dm-secdel"
 
 # Select which syzkaller config template to use from 'config/syzkaller/'
-export SYZ_CONFIG_TEMPLATE="drivers_md_dm"
+export SYZ_CONFIG_TEMPLATE="dm-secdel"
 
 # Space-separated list of sys/linux/*.txt files for which to regenerate
 # .const via syz-extract during the syzkaller build
-export SYZ_EXTRACT_TARGETS="dev_dm.txt"
+export SYZ_EXTRACT_TARGETS="dev_dm.txt dev_dm_secdel.txt"
 
 # ALT Linux branch ('p11', 'p10', 'sisyphus', etc.)
 export ALT_BRANCH="p11"
