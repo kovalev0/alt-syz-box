@@ -1,0 +1,462 @@
+From f0a687761d70c9748ebf729f8d592cba12209c92 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Mon, 31 Aug 2026 10:00:00 +0000
+Subject: [PATCH] sys/linux, executor: add device-mapper descriptions and
+ syz_dm_setup
+
+Adds the /dev/mapper/control ioctl ABI and syz_dm_setup, a pseudo-syscall
+that creates, loads and resumes a device-mapper target in one step so its
+.map callback is actually reachable. Only linear, zero and error are enabled.
+
+---
+ executor/common_linux.h      | 140 +++++++++++
+ pkg/vminfo/linux_syscalls.go |   1 +
+ sys/linux/dev_dm.txt         | 446 +++++++++++++++++++++++++++++++++++
+ sys/linux/dev_dm.txt.const   |  48 ++++
+ 4 files changed, 635 insertions(+)
+ create mode 100644 sys/linux/dev_dm.txt
+ create mode 100644 sys/linux/dev_dm.txt.const
+
+diff --git a/executor/common_linux.h b/executor/common_linux.h
+index c1368f2..3b85154 100644
+--- a/executor/common_linux.h
++++ b/executor/common_linux.h
+@@ -2433,6 +2433,146 @@ static long syz_extract_tcp_res(volatile long a0, volatile long a1, volatile lon
+ #include "common_usb_linux.h"
+ #endif
+ 
++#if SYZ_EXECUTOR || __NR_syz_dm_setup
++#include <fcntl.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <sys/stat.h>
++#include <sys/sysmacros.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++// syz_dm_setup(index intptr, target ptr[in, string], params ptr[in, string], sectors intptr) fd
++//
++// Creates (or reuses) a mapped device, loads a single-target table onto it,
++// resumes it, and returns an fd on the resulting block device.
++//
++// A program can do this by hand -- DM_DEV_CREATE, DM_TABLE_LOAD,
++// DM_DEV_SUSPEND, open of /dev/dm-N -- but not by chance. The three ioctls have
++// to agree on a device name that syzkaller draws independently for each of
++// them; the table only becomes live if DM_SUSPEND_FLAG happens to be absent,
++// because do_resume() is the sole path that swaps an inactive table in; and the
++// minor of the resulting node is whatever dm's idr hands out. Until all four
++// line up dm_submit_bio() answers every bio with "mapping table unavailable,
++// erroring io" and the target is never entered at all.
++//
++// The device name and minor are derived from index, so devices are reused
++// rather than accumulated, and two procs picking the same index race on
++// suspend/resume, which is itself worth covering.
++//
++// Structures are spelled out locally rather than pulled from
++// <linux/dm-ioctl.h> so that generated C reproducers build anywhere.
++#define SYZ_DM_NAME_LEN 128
++#define SYZ_DM_UUID_LEN 129
++#define SYZ_DM_TYPE_LEN 16
++#define SYZ_DM_IOCTL_SIZE 312
++#define SYZ_DM_VERSION_MAJOR 4
++#define SYZ_DM_PERSISTENT_DEV_FLAG 8
++
++struct syz_dm_ioctl {
++	uint32 version[3];
++	uint32 data_size;
++	uint32 data_start;
++	uint32 target_count;
++	int open_count;
++	uint32 flags;
++	uint32 event_nr;
++	uint32 padding;
++	uint64 dev;
++	char name[SYZ_DM_NAME_LEN];
++	char uuid[SYZ_DM_UUID_LEN];
++	char data[7];
++};
++
++struct syz_dm_target_spec {
++	uint64 sector_start;
++	uint64 length;
++	int status;
++	uint32 next;
++	char target_type[SYZ_DM_TYPE_LEN];
++};
++
++#define SYZ_DM_IOCTL(nr) _IOWR(0xfd, nr, struct syz_dm_ioctl)
++
++static void syz_dm_hdr(struct syz_dm_ioctl* dmi, const char* name)
++{
++	memset(dmi, 0, SYZ_DM_IOCTL_SIZE);
++	dmi->version[0] = SYZ_DM_VERSION_MAJOR;
++	dmi->version[1] = 0;
++	dmi->version[2] = 0;
++	dmi->data_size = SYZ_DM_IOCTL_SIZE;
++	dmi->data_start = SYZ_DM_IOCTL_SIZE;
++	strncpy(dmi->name, name, SYZ_DM_NAME_LEN - 1);
++}
++
++static long syz_dm_setup(volatile long a0, volatile long a1, volatile long a2, volatile long a3)
++{
++	unsigned index = (unsigned)a0 & 7;
++	const char* target = (const char*)a1;
++	const char* params = (const char*)a2;
++	uint64 sectors = (uint64)a3;
++
++	char buf[SYZ_DM_IOCTL_SIZE + sizeof(struct syz_dm_target_spec) + 512];
++	struct syz_dm_ioctl* dmi = (struct syz_dm_ioctl*)buf;
++	struct syz_dm_target_spec* spec =
++	    (struct syz_dm_target_spec*)(buf + SYZ_DM_IOCTL_SIZE);
++	char* pstr = (char*)(spec + 1);
++	char name[SYZ_DM_NAME_LEN];
++	char node[64];
++	size_t plen;
++	int ctl, fd;
++
++	if (SYZ_DM_IOCTL_SIZE != sizeof(struct syz_dm_ioctl))
++		return -1;
++
++	ctl = open("/dev/mapper/control", O_RDWR);
++	if (ctl == -1)
++		return -1;
++	snprintf(name, sizeof(name), "syzdm%u", index);
++
++	// Create. An existing device from an earlier program is fine: the table
++	// load below simply replaces its inactive table.
++	syz_dm_hdr(dmi, name);
++	dmi->flags = SYZ_DM_PERSISTENT_DEV_FLAG;
++	dmi->dev = index;
++	ioctl(ctl, SYZ_DM_IOCTL(3), dmi);
++
++	// Load a single-target table.
++	memset(buf, 0, sizeof(buf));
++	syz_dm_hdr(dmi, name);
++	dmi->target_count = 1;
++	spec->sector_start = 0;
++	spec->length = sectors;
++	strncpy(spec->target_type, target, SYZ_DM_TYPE_LEN - 1);
++	strncpy(pstr, params, 511);
++	pstr[511] = 0;
++	plen = strlen(pstr) + 1;
++	spec->next = sizeof(struct syz_dm_target_spec) + plen;
++	dmi->data_size = SYZ_DM_IOCTL_SIZE + sizeof(struct syz_dm_target_spec) + plen;
++	if (ioctl(ctl, SYZ_DM_IOCTL(9), dmi) != 0) {
++		close(ctl);
++		return -1;
++	}
++
++	// Resume. flags has no DM_SUSPEND_FLAG, so dev_suspend() takes the
++	// do_resume() branch, which is what makes the table live.
++	syz_dm_hdr(dmi, name);
++	ioctl(ctl, SYZ_DM_IOCTL(6), dmi);
++	close(ctl);
++
++	snprintf(node, sizeof(node), "/dev/dm-%u", index);
++	fd = open(node, O_RDWR);
++	if (fd == -1) {
++		// devtmpfs may be absent; make a private node instead.
++		snprintf(node, sizeof(node), "./syzdm%u", index);
++		mknod(node, S_IFBLK | 0600, makedev(dmi->dev >> 20, dmi->dev & 0xfffff));
++		fd = open(node, O_RDWR);
++	}
++	return fd;
++}
++#endif
++
+ #if SYZ_EXECUTOR || __NR_syz_open_dev
+ #include <fcntl.h>
+ #include <string.h>
+diff --git a/pkg/vminfo/linux_syscalls.go b/pkg/vminfo/linux_syscalls.go
+index 8e5871b..d37d0a3 100644
+--- a/pkg/vminfo/linux_syscalls.go
++++ b/pkg/vminfo/linux_syscalls.go
+@@ -70,6 +70,7 @@ var linuxSyscallChecks = map[string]func(*checkContext, *prog.Syscall) string{
+ 	"syz_open_dev":                  linuxSyzOpenDevSupported,
+ 	"syz_open_procfs":               linuxSyzOpenProcfsSupported,
+ 	"syz_open_pts":                  alwaysSupported,
++	"syz_dm_setup":                  alwaysSupported,
+ 	"syz_execute_func":              alwaysSupported,
+ 	"syz_emit_ethernet":             linuxNetInjectionSupported,
+ 	"syz_extract_tcp_res":           linuxNetInjectionSupported,
+diff --git a/sys/linux/dev_dm.txt b/sys/linux/dev_dm.txt
+new file mode 100644
+index 0000000..105cd18
+--- /dev/null
++++ b/sys/linux/dev_dm.txt
+@@ -0,0 +1,217 @@
++include <linux/fcntl.h>
++include <uapi/linux/dm-ioctl.h>
++include <uapi/linux/fs.h>
++
++# ==================== RESOURCES ====================
++
++resource fd_dm_control[fd]
++resource fd_dm[fd_block]
++resource fd_dm_sysfs[fd]
++
++# ==================== IOCTLS / CALLS ====================
++
++openat$dm_control(fd const[AT_FDCWD], file ptr[in, string["/dev/mapper/control"]], flags flags[open_flags], mode const[0]) fd_dm_control
++
++syz_open_dev$dm(dev ptr[in, string["/dev/dm-#"]], id intptr[0:9], flags flags[open_flags]) fd_dm
++
++syz_dm_setup(index intptr[0:7], target ptr[in, string[dm_target_types]], params ptr[in, string[dm_params_any]], sectors flags[dm_target_lengths]) fd_dm
++
++ioctl$DM_VERSION(fd fd_dm_control, cmd const[DM_VERSION], arg ptr[inout, dm_ioctl_none])
++ioctl$DM_REMOVE_ALL(fd fd_dm_control, cmd const[DM_REMOVE_ALL], arg ptr[inout, dm_ioctl_none])
++ioctl$DM_LIST_DEVICES(fd fd_dm_control, cmd const[DM_LIST_DEVICES], arg ptr[inout, dm_ioctl_none])
++ioctl$DM_LIST_VERSIONS(fd fd_dm_control, cmd const[DM_LIST_VERSIONS], arg ptr[inout, dm_ioctl_none])
++
++ioctl$DM_GET_TARGET_VERSION(fd fd_dm_control, cmd const[DM_GET_TARGET_VERSION], arg ptr[inout, dm_ioctl_tgtname])
++
++ioctl$DM_DEV_CREATE(fd fd_dm_control, cmd const[DM_DEV_CREATE], arg ptr[inout, dm_ioctl_create])
++
++ioctl$DM_DEV_REMOVE(fd fd_dm_control, cmd const[DM_DEV_REMOVE], arg ptr[inout, dm_ioctl_none])
++ioctl$DM_DEV_REMOVE_uuid(fd fd_dm_control, cmd const[DM_DEV_REMOVE], arg ptr[inout, dm_ioctl_none_uuid])
++ioctl$DM_DEV_REMOVE_dev(fd fd_dm_control, cmd const[DM_DEV_REMOVE], arg ptr[inout, dm_ioctl_none_dev])
++ioctl$DM_DEV_RESUME(fd fd_dm_control, cmd const[DM_DEV_SUSPEND], arg ptr[inout, dm_ioctl_resume])
++ioctl$DM_DEV_SUSPEND(fd fd_dm_control, cmd const[DM_DEV_SUSPEND], arg ptr[inout, dm_ioctl_suspend])
++ioctl$DM_DEV_STATUS(fd fd_dm_control, cmd const[DM_DEV_STATUS], arg ptr[inout, dm_ioctl_none])
++ioctl$DM_DEV_STATUS_uuid(fd fd_dm_control, cmd const[DM_DEV_STATUS], arg ptr[inout, dm_ioctl_none_uuid])
++ioctl$DM_DEV_ARM_POLL(fd fd_dm_control, cmd const[DM_DEV_ARM_POLL], arg ptr[inout, dm_ioctl_none])
++
++ioctl$DM_DEV_WAIT(fd fd_dm_control, cmd const[DM_DEV_WAIT], arg ptr[inout, dm_ioctl_none])
++
++ioctl$DM_DEV_RENAME(fd fd_dm_control, cmd const[DM_DEV_RENAME], arg ptr[inout, dm_ioctl_rename])
++
++ioctl$DM_DEV_SET_GEOMETRY(fd fd_dm_control, cmd const[DM_DEV_SET_GEOMETRY], arg ptr[inout, dm_ioctl_geometry])
++
++ioctl$DM_TABLE_CLEAR(fd fd_dm_control, cmd const[DM_TABLE_CLEAR], arg ptr[inout, dm_ioctl_none])
++ioctl$DM_TABLE_DEPS(fd fd_dm_control, cmd const[DM_TABLE_DEPS], arg ptr[inout, dm_ioctl_none])
++
++ioctl$DM_TABLE_STATUS(fd fd_dm_control, cmd const[DM_TABLE_STATUS], arg ptr[inout, dm_ioctl_none])
++
++# ==================== STRUCTS ====================
++
++type dm_ioctl_t[NTARGETS, IDENT, FLAGS, PAYLOAD] {
++	version		dm_version
++	data_size	len[parent, int32]
++	data_start	offsetof[payload, int32]
++	target_count	const[NTARGETS, int32]
++	open_count	const[0, int32]
++	flags		FLAGS
++	event_nr	int32[0:8]
++	padding		const[0, int32]
++	ident		IDENT
++	data		array[const[0, int8], 7]
++	payload		PAYLOAD
++}
++
++dm_version {
++	major	const[DM_VERSION_MAJOR, int32]
++	minor	int32[0:DM_VERSION_MINOR]
++	patch	int32[0:4]
++}
++
++dm_ident_name {
++	dev	const[0, int64]
++	name	string[dm_names, DM_NAME_LEN]
++	uuid	array[const[0, int8], DM_UUID_LEN]
++}
++
++dm_ident_uuid {
++	dev	const[0, int64]
++	name	array[const[0, int8], DM_NAME_LEN]
++	uuid	string[dm_uuids, DM_UUID_LEN]
++}
++
++dm_ident_dev {
++	dev	flags[dm_devnos, int64]
++	name	array[const[0, int8], DM_NAME_LEN]
++	uuid	array[const[0, int8], DM_UUID_LEN]
++}
++
++dm_ident_create {
++	dev	int64[0:9]
++	name	string[dm_names, DM_NAME_LEN]
++	uuid	string[dm_uuids, DM_UUID_LEN]
++}
++
++dm_ident_tgtname {
++	dev	const[0, int64]
++	name	string[dm_target_types, DM_NAME_LEN]
++	uuid	array[const[0, int8], DM_UUID_LEN]
++}
++
++type dm_ioctl_none dm_ioctl_t[0, dm_ident_name, flags[dm_ioctl_flags, int32], array[int8, 0:512]]
++type dm_ioctl_resume dm_ioctl_t[0, dm_ident_name, flags[dm_resume_flags, int32], array[int8, 0:64]]
++type dm_ioctl_suspend dm_ioctl_t[0, dm_ident_name, flags[dm_suspend_flags, int32], array[int8, 0:64]]
++type dm_ioctl_none_uuid dm_ioctl_t[0, dm_ident_uuid, flags[dm_ioctl_flags, int32], array[int8, 0:512]]
++type dm_ioctl_none_dev dm_ioctl_t[0, dm_ident_dev, flags[dm_ioctl_flags, int32], array[int8, 0:512]]
++type dm_ioctl_create dm_ioctl_t[0, dm_ident_create, flags[dm_ioctl_flags, int32], array[int8, 0:64]]
++type dm_ioctl_tgtname dm_ioctl_t[0, dm_ident_tgtname, flags[dm_ioctl_flags, int32], array[int8, 0:512]]
++type dm_ioctl_rename dm_ioctl_t[0, dm_ident_name, flags[dm_ioctl_flags, int32], string[dm_rename_names]]
++type dm_ioctl_geometry dm_ioctl_t[0, dm_ident_name, flags[dm_ioctl_flags, int32], string[dm_geometry_strings]]
++
++# ==================== FLAGS & PARAMS ====================
++
++dm_rename_names = "syz0", "syz1", "syz2", "syz/0", "", "syz-uuid0"
++
++dm_geometry_strings = "0 0 0 0", "1 1 1 0", "65535 255 255 0", "65536 255 255 0", "1 1 1", "18446744073709551615 1 1 0", "-1 -1 -1 -1"
++
++dm_names = "syzkeep", "syzsecdel0", "syz0", "syz1"
++dm_uuids = "syz-uuid0", "syz-uuid1", "syz-uuid2", ""
++dm_devnos = 265289728, 265289729, 265289730, 264241152, 266338304, 0
++
++dm_resume_flags = DM_SKIP_LOCKFS_FLAG, DM_NOFLUSH_FLAG, DM_READONLY_FLAG
++dm_suspend_flags = DM_SUSPEND_FLAG, DM_SKIP_LOCKFS_FLAG, DM_NOFLUSH_FLAG
++
++dm_ioctl_flags = DM_READONLY_FLAG, DM_SUSPEND_FLAG, DM_PERSISTENT_DEV_FLAG, DM_STATUS_TABLE_FLAG, DM_SKIP_BDGET_FLAG, DM_SKIP_LOCKFS_FLAG, DM_NOFLUSH_FLAG, DM_QUERY_INACTIVE_TABLE_FLAG, DM_UUID_FLAG, DM_SECURE_DATA_FLAG, DM_DEFERRED_REMOVE, DM_IMA_MEASUREMENT_FLAG
++
++ioctl$DM_TARGET_MSG(fd fd_dm_control, cmd const[DM_TARGET_MSG], arg ptr[inout, dm_ioctl_msg])
++ioctl$DM_TARGET_MSG_stats(fd fd_dm_control, cmd const[DM_TARGET_MSG], arg ptr[inout, dm_ioctl_msg_stats])
++
++type dm_ioctl_msg dm_ioctl_t[0, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_msg]
++type dm_ioctl_msg_stats dm_ioctl_t[0, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_msg_stats]
++
++dm_target_msg {
++	sector	flags[dm_msg_sectors, int64]
++	message	string[dm_messages, 64]
++}
++
++dm_target_msg_stats {
++	sector	const[0, int64]
++	message	string[dm_stats_messages, 96]
++}
++
++dm_msg_sectors = 0, 8, 4096, 65535, 65536, 18446744073709551615
++
++dm_messages = "", "ping", "flush", "noflush", "enable", "disable", "queryblock", "addbadblock 60", "removebadblock 60", "countbadblocks", "clearbadblocks", "drop_writes", "clear_drop_writes", "error_writes", "clear_error_writes", "create_thin 0", "create_snap 1 0", "delete 0", "set_transaction_id 0 1", "reserve_metadata_snap", "release_metadata_snap", "checkpoint", "take_metadata_snap", "drop_metadata_snap", "queue_if_no_path", "fail_if_no_path", "disable_queue_if_no_path", "reinstate_path 1:0", "fail_path 1:0", "switch_group", "flush_on_suspend", "cleaner", "pause_writeback", "resume_writeback"
++
++dm_stats_messages = "@stats_list", "@stats_list syz", "@stats_create - 1", "@stats_create - 8", "@stats_create 0+1024 1", "@stats_create 0+1024 /16", "@stats_create - 1 precise_timestamps", "@stats_create - 1 2 precise_timestamps histogram:1,2,4", "@stats_create - 1 1 histogram:1,10,100", "@stats_create - 0", "@stats_create - 18446744073709551615", "@stats_delete 0", "@stats_delete 1", "@stats_delete 4294967295", "@stats_clear 0", "@stats_print 0", "@stats_print 0 0 1", "@stats_print_clear 0", "@stats_set_aux 0 syz", "@stats_create", "@stats_bogus 0"
++
++ioctl$DM_TABLE_LOAD(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_any])
++ioctl$DM_TABLE_LOAD_2(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_pair])
++
++type dm_load_any dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_any]
++type dm_load_pair dm_ioctl_t[2, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_pair]
++
++dm_target_lengths = 65536, 32768, 4096, 8, 1, 0, 65537, 18446744073709551615
++
++dm_target_any {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string[dm_target_types, DM_MAX_TYPE_NAME]
++	params		string[dm_params_any, 64]
++}
++
++dm_target_pair {
++	t0	dm_target_half0
++	t1	dm_target_half1
++}
++
++dm_target_half0 {
++	sector_start	const[0, int64]
++	length		const[32768, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string[dm_target_types, DM_MAX_TYPE_NAME]
++	params		string[dm_params_any, 64]
++}
++
++dm_target_half1 {
++	sector_start	const[32768, int64]
++	length		const[32768, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string[dm_target_types, DM_MAX_TYPE_NAME]
++	params		string[dm_params_any, 64]
++}
++
++dm_target_types = "linear", "error", "zero", "syz"
++
++dm_params_any = "", "1:0 0", "1:0 0 R", "1:1 0", "2 8 1:0 0 1:1 0", "1:0 1:1", "1:0 1:1 N 8", "core 1 1024 2 1:0 0 1:1 0", "0 0 1 1 round-robin 0 1 1 1:0 1", "1:0 0 1 1", "1:0 0 512", "0", "1", "-1", "1:0 0 0 0 0 0 0 0"
++
++openat$dm_sysfs(fd const[AT_FDCWD], file ptr[in, string[dm_sysfs_files]], flags flags[open_flags], mode const[0]) fd_dm_sysfs
++read$dm_sysfs(fd fd_dm_sysfs, buf ptr[out, array[int8]], count bytesize[buf])
++write$dm_sysfs(fd fd_dm_sysfs, buf ptr[in, string[dm_sysfs_values]], count bytesize[buf])
++
++dm_sysfs_files = "/sys/block/dm-0/dm/name", "/sys/block/dm-0/dm/uuid", "/sys/block/dm-0/dm/suspended", "/sys/block/dm-0/dm/use_blk_mq", "/sys/block/dm-0/dm/rq_based_seq_io_merge_deadline", "/sys/block/dm-1/dm/name", "/sys/block/dm-1/dm/suspended", "/sys/block/dm-1/dm/rq_based_seq_io_merge_deadline"
++
++dm_sysfs_values = "0", "1", "100", "100000", "-1", "18446744073709551615", "syz", ""
++
++ioctl$dm_BLKDISCARD(fd fd_dm, cmd const[BLKDISCARD], arg ptr[in, dm_blk_range])
++ioctl$dm_BLKSECDISCARD(fd fd_dm, cmd const[BLKSECDISCARD], arg ptr[in, dm_blk_range])
++ioctl$dm_BLKZEROOUT(fd fd_dm, cmd const[BLKZEROOUT], arg ptr[in, dm_blk_range])
++ioctl$dm_BLKFLSBUF(fd fd_dm, cmd const[BLKFLSBUF], arg const[0])
++
++dm_blk_range {
++	start	flags[dm_blk_offsets, int64]
++	len	flags[dm_blk_lengths, int64]
++}
++
++dm_blk_offsets = 0, 512, 4096, 65536, 1048576, 16777216, 33553920, 33554432, 18446744073709551104
++dm_blk_lengths = 512, 4096, 65536, 1048576, 16777216, 33554432, 0, 18446744073709551104
++
++ioctl$dm_passthrough(fd fd_dm, cmd flags[dm_passthrough_cmds], arg ptr[in, array[int8, 64]])
++
++dm_passthrough_cmds = 0x2285, 0x2282, 0x2201, 0x2202, 0x5331, 0x5309, 0x5382, 0x5386, 0x1, 0x127, 0x309, 0x30b, 0x4b3a, 0x6b01, 0x125f, 0x2000, 0xffff
++
++pread64$dm(fd fd_dm, buf ptr[out, array[int8]], count bytesize[buf], pos flags[dm_blk_offsets])
++pwrite64$dm(fd fd_dm, buf ptr[in, array[int8]], count bytesize[buf], pos flags[dm_blk_offsets])
+diff --git a/sys/linux/dev_dm.txt.const b/sys/linux/dev_dm.txt.const
+new file mode 100644
+index 0000000..7173c65
+--- /dev/null
++++ b/sys/linux/dev_dm.txt.const
+@@ -0,0 +1,48 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AT_FDCWD = amd64:18446744073709551516
++BLKDISCARD = amd64:4727
++BLKFLSBUF = amd64:4705
++BLKSECDISCARD = amd64:4733
++BLKZEROOUT = amd64:4735
++DM_DEFERRED_REMOVE = amd64:131072
++DM_DEV_ARM_POLL = amd64:3241737488
++DM_DEV_CREATE = amd64:3241737475
++DM_DEV_REMOVE = amd64:3241737476
++DM_DEV_RENAME = amd64:3241737477
++DM_DEV_SET_GEOMETRY = amd64:3241737487
++DM_DEV_STATUS = amd64:3241737479
++DM_DEV_SUSPEND = amd64:3241737478
++DM_DEV_WAIT = amd64:3241737480
++DM_GET_TARGET_VERSION = amd64:3241737489
++DM_IMA_MEASUREMENT_FLAG = amd64:524288
++DM_LIST_DEVICES = amd64:3241737474
++DM_LIST_VERSIONS = amd64:3241737485
++DM_MAX_TYPE_NAME = amd64:16
++DM_NAME_LEN = amd64:128
++DM_NOFLUSH_FLAG = amd64:2048
++DM_PERSISTENT_DEV_FLAG = amd64:8
++DM_QUERY_INACTIVE_TABLE_FLAG = amd64:4096
++DM_READONLY_FLAG = amd64:1
++DM_REMOVE_ALL = amd64:3241737473
++DM_SECURE_DATA_FLAG = amd64:32768
++DM_SKIP_BDGET_FLAG = amd64:512
++DM_SKIP_LOCKFS_FLAG = amd64:1024
++DM_STATUS_TABLE_FLAG = amd64:16
++DM_SUSPEND_FLAG = amd64:2
++DM_TABLE_CLEAR = amd64:3241737482
++DM_TABLE_DEPS = amd64:3241737483
++DM_TABLE_LOAD = amd64:3241737481
++DM_TABLE_STATUS = amd64:3241737484
++DM_TARGET_MSG = amd64:3241737486
++DM_UUID_FLAG = amd64:16384
++DM_UUID_LEN = amd64:129
++DM_VERSION = amd64:3241737472
++DM_VERSION_MAJOR = amd64:4
++DM_VERSION_MINOR = amd64:48
++__NR_ioctl = amd64:16
++__NR_openat = amd64:257
++__NR_pread64 = amd64:17
++__NR_pwrite64 = amd64:18
++__NR_read = amd64:0
++__NR_write = amd64:1
+-- 
+2.43.0
+
