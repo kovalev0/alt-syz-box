@@ -161,6 +161,11 @@ cat "$KERNEL_DIR"/arch/x86/configs/x86_64_defconfig >> "$KERNEL_BUILD_DIR/.confi
     -e 9P_FS -e 9P_FS_POSIX_ACL \
     -e NET_9P -e NET_9P_VIRTIO
 
+# fix SYZFAIL: tun: ioctl(TUNSETIFF) failed (errno 16: Device or resource busy)
+# err    --set-str LSM "selinux"
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    --set-str LSM "landlock,lockdown,yama,loadpin,safesetid,integrity,bpf,altha,kiosk"
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
