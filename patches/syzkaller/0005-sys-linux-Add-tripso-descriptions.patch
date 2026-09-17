@@ -1,0 +1,346 @@
+From b8cc536b79996c00c7a30974b57efd61849b5575 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Tue, 1 Sep 2026 10:00:00 +0000
+Subject: [PATCH 5/5] sys/linux: Add tripso descriptions and a translation seed
+
+The TRIPSO iptables *target* (package t/tripso, upstream github.com/vt-alt/
+tripso), grafted into net/netfilter/tripso/ and built =y.
+
+Unlike the "so" match in netfilter_ipt_so.txt, TRIPSO rewrites the packet's
+security label and, crucially, is gated on IP options: tripso_tg() opens with
+
+    len = ip_hdrlen(skb) - sizeof(struct iphdr);   // length of IP options
+    while (len >= 2) { ... }
+
+so a packet with no options walks straight to "return XT_CONTINUE" and only the
+prologue runs. Reaching parse_cipso / parse_rfc1108_astra / write_cipso /
+write_astra / mangle_options -- the bulk of xt_TRIPSO.c -- needs BOTH a
+"-j TRIPSO" rule installed AND a packet carrying a valid security option to
+cross that rule's hook. A match keeps its code warm off any loopback traffic
+once a rule exists; a gated target does not, so shipping only the setsockopt
+skeletons (as the first cut did) left xt_TRIPSO.c at 0%.
+
+Descriptions mirror config/unit-tests/tests/tripso.sh:
+  * A raw-table skeleton (ipt_tripso_replace_raw, valid_hooks = PRE_ROUTING |
+    LOCAL_OUT) so a rule sits in raw/PRE_ROUTING -- the hook the unit test
+    uses. PRE_ROUTING runs inside ip_rcv() before ip_options_compile() ->
+    cipso_v4_validate(), so a CIPSO packet reaches tripso_tg() even with no DOI
+    registered. filter/mangle/security skeletons are kept as well.
+  * A dedicated labelled sender sendto$inet_hdrincl_tripso that always emits an
+    IPOPT_SEC/IPOPT_CIPSO packet, reusing sock_raw_hdrincl / ipv4_labeled_packet
+    and the Astra/CIPSO options from netfilter_ipt_so.txt (same wire format the
+    unit test crafts by hand) under a TRIPSO-specific name.
+  * struct tripso_info { uint32_t tr_mode } pinned to TRIPSO_CIPSO or
+    TRIPSO_ASTRA, plus one unconstrained variant for the copy-verbatim branch.
+
+The entry/skeleton machinery (ipt_xa_entry, ipt_entry_underflow, ipt_unused,
+ipt_xa_proto_any, xt_counters, xt_target_t) is reused from
+netfilter_xt_addons.txt and the labelled-packet types from netfilter_ipt_so.txt;
+all three files are extracted into one tree, so those types are in scope and are
+not redefined here.
+
+sys/linux/test/netfilter_tripso_translate is a seed program syzkaller loads
+automatically (pkg/manager ParseSeed reads sys/<os>/test in NonStrict mode). It
+hard-codes the rule+packet sequence for both directions -- a --to-astra rule
+with a CIPSO packet (parse_cipso/write_astra, header-shrink) and a --to-cipso
+rule with an Astra packet (parse_rfc1108_astra/write_cipso, header-expand), all
+over loopback -- so the very first execution lands in the translation core and
+the fuzzer mutates outward instead of waiting for a rule+packet pairing to occur
+by chance. Over a multi-hour run this brings xt_TRIPSO.c to ~57% coverage.
+---
+ sys/linux/netfilter_tripso.txt            | 237 ++++++++++++++++++++++
+ sys/linux/netfilter_tripso.txt.const      |  14 ++
+ sys/linux/test/netfilter_tripso_translate |  16 ++
+ 3 files changed, 267 insertions(+)
+ create mode 100644 sys/linux/netfilter_tripso.txt
+ create mode 100644 sys/linux/netfilter_tripso.txt.const
+ create mode 100644 sys/linux/test/netfilter_tripso_translate
+
+diff --git a/sys/linux/netfilter_tripso.txt b/sys/linux/netfilter_tripso.txt
+new file mode 100644
+index 0000000..167b03b
+--- /dev/null
++++ b/sys/linux/netfilter_tripso.txt
+@@ -0,0 +1,237 @@
++# Copyright 2026 alt-syz-box authors. All rights reserved.
++# Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
++#
++# syzkaller descriptions for tripso (xt_TRIPSO.ko), the "TRIPSO" iptables
++# *target* that re-encodes a packet's IPv4 security label between CIPSO and
++# RFC 1108 / GOST R 58256-2018 (Astra Linux SE).
++# Package t/tripso (git://git.altlinux.org/gears/t/tripso.git), upstream
++# github.com/vt-alt/tripso. Grafted into net/netfilter/tripso/ and built =y.
++#
++# WHY THE FIRST VERSION SCORED 0% AND WHAT CHANGED
++# ------------------------------------------------
++# xt_so (netfilter_ipt_so.txt) is a *match*: so_mt() runs on every packet that
++# traverses a chain carrying an "so" rule, so once any program installs such a
++# rule, ordinary loopback traffic keeps the match's code warm and coverage
++# accrues even without a tight rule+packet pairing.
++#
++# TRIPSO is a *target* AND it is gated on IP options. tripso_tg() opens with
++#     len = ip_hdrlen(skb) - sizeof(struct iphdr)   // = length of IP options
++#     while (len >= 2) { ... }
++# so a packet with no options (virtually all loopback traffic) walks straight to
++# "return XT_CONTINUE" -- only the prologue runs. Reaching parse_cipso /
++# parse_rfc1108_astra / write_cipso / write_astra / mangle_options (which is
++# where ~90% of xt_TRIPSO.c lives, per the unit test) needs BOTH a "-j TRIPSO"
++# rule installed AND a packet carrying a *valid* security option to cross that
++# rule's hook. The first cut only shipped the setsockopt skeletons and hoped the
++# fuzzer would pair them with the ipt-so labelled sender by chance; for a gated
++# target that pairing is too rare, hence 0% after hours.
++#
++# Fixes here, mirroring the in-guest unit test (config/unit-tests/tests/
++# tripso.sh) that reaches >90%:
++#   * A raw-table skeleton (ipt_tripso_replace_raw) so a rule sits in
++#     raw/PRE_ROUTING -- the hook the unit test uses. PRE_ROUTING runs inside
++#     ip_rcv() before ip_options_compile()->cipso_v4_validate(), so a CIPSO
++#     packet reaches tripso_tg() there even with no DOI registered.
++#   * A dedicated labelled sender, sendto$inet_hdrincl_tripso, so the fuzzer has
++#     a TRIPSO-named injector that always emits an IPOPT_SEC/IPOPT_CIPSO packet
++#     at a high rate (rather than a 2-of-14 union member it rarely picks).
++#   * Both tr_mode values kept as first-class variants so the fuzzer can pair a
++#     CIPSO packet with --to-astra and an Astra packet with --to-cipso.
++# A seed program (sys/linux/test/netfilter_tripso_translate) hard-codes the
++# rule+packet sequence so the very first execution lands in the translation
++# core; the fuzzer mutates outward from there.
++#
++# REUSED FROM THE COMPANION FILES (same syzkaller build, one shared namespace)
++# ---------------------------------------------------------------------------
++# netfilter_xt_addons.txt: ipt_xa_entry, ipt_xa_proto_any, ipt_entry_underflow,
++# ipt_unused, xt_counters, xt_target_t. netfilter_ipt_so.txt: the raw-hdrincl
++# socket resource sock_raw_hdrincl, the labelled packet ipv4_labeled_packet with
++# its ipv4_option_sec_astra / ipv4_option_cipso_so options and cipso_doi pool,
++# sockaddr_in_lo, ipv4_lo_addr, send_flags. Those are NOT redefined here (that
++# would be a duplicate-type error); this file adds only the TRIPSO target
++# payload, its four table skeletons, the setsockopt variants that install them,
++# and one extra sender that reuses the ipt-so packet types under a TRIPSO name.
++
++include <linux/socket.h>
++include <uapi/linux/netfilter.h>
++include <uapi/linux/netfilter/x_tables.h>
++include <uapi/linux/netfilter_ipv4/ip_tables.h>
++include <uapi/linux/netfilter/xt_tripso_compat.h>
++include <linux/netfilter/xt_TRIPSO.h>
++include <uapi/linux/in.h>
++
++# Self-contained copies of the tables' valid_hooks masks.
++define TRIPSO_RAW_VALID_HOOKS		(1 << NF_INET_PRE_ROUTING) | (1 << NF_INET_LOCAL_OUT)
++define TRIPSO_FILTER_VALID_HOOKS	(1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT)
++define TRIPSO_MANGLE_VALID_HOOKS	(1 << NF_INET_PRE_ROUTING) | (1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT) | (1 << NF_INET_POST_ROUTING)
++define TRIPSO_SECURITY_VALID_HOOKS	(1 << NF_INET_LOCAL_IN) | (1 << NF_INET_FORWARD) | (1 << NF_INET_LOCAL_OUT)
++
++# ==================== SYSCALLS ====================
++# TRIPSO's README uses "iptables -t security", but tripso_tg_reg sets no .table,
++# so raw/filter/mangle are valid too. raw and mangle add the PRE_ROUTING path,
++# which sees a CIPSO packet before cipso_v4_validate() runs; the unit test drives
++# raw/PRE_ROUTING as its primary channel.
++
++setsockopt$IPT_SO_SET_REPLACE_TRIPSO_RAW(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_tripso_replace_raw], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_TRIPSO_FILTER(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_tripso_replace_filter], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_TRIPSO_MANGLE(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_tripso_replace_mangle], len len[val])
++setsockopt$IPT_SO_SET_REPLACE_TRIPSO_SECURITY(fd sock_in, level const[SOL_IP], opt const[IPT_SO_SET_REPLACE], val ptr[in, ipt_tripso_replace_security], len len[val])
++
++# Dedicated labelled sender (a "magnet" so the fuzzer emits TRIPSO-relevant
++# packets often). It reuses sock_raw_hdrincl / ipv4_labeled_packet / the local
++# sockaddr from netfilter_ipt_so.txt -- same wire format the unit test crafts by
++# hand -- just under a TRIPSO-specific name. IP_HDRINCL lets the option bytes
++# reach tripso_tg() intact.
++sendto$inet_hdrincl_tripso(fd sock_raw_hdrincl, buf ptr[in, ipv4_labeled_packet], len bytesize[buf], f flags[send_flags], addr ptr[in, sockaddr_in_lo], addrlen len[addr])
++
++# ==================== TABLE SKELETONS ====================
++# Same layout as netfilter_xt_addons.txt / netfilter_ipt_so.txt: for k valid
++# hooks, k+1 entries -- the TRIPSO rule first, then one unconditional STANDARD
++# ACCEPT policy entry per hook -- so hook_entry[] and underflow[] are strictly
++# increasing (xt_check_table_hooks) and num_entries == num_counters ==
++# hweight32(valid_hooks) + 1 (xt_replace_table). The rule is reachable from the
++# table's first valid hook: PRE_ROUTING for raw/mangle, LOCAL_IN for
++# filter/security. The rule carries zero matches and the TRIPSO target;
++# ipt_xa_proto_any leaves ipt_ip.proto unpinned (TRIPSO declares no .proto).
++
++# ---- raw: PRE_ROUTING + LOCAL_OUT (valid_hooks = 9) ----
++ipt_tripso_replace_raw {
++	name			string["raw", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[TRIPSO_RAW_VALID_HOOKS, int32]
++	num_entries		const[3, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing	const[0, int32]
++	hook_local_in		ipt_unused
++	hook_forward		ipt_unused
++	hook_local_out		offsetof[entries:p1, int32]
++	hook_post_routing	ipt_unused
++	underflow_pre_routing	offsetof[entries:p1, int32]
++	underflow_local_in	ipt_unused
++	underflow_forward	ipt_unused
++	underflow_local_out	offsetof[entries:p2, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[3, int32]
++	counters		ptr[out, array[xt_counters, 3]]
++	entries			ipt_tripso_entries_raw
++}
++
++ipt_tripso_entries_raw {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_tripso_no_matches, xa_tripso_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_tripso_replace_filter {
++	name			string["filter", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[TRIPSO_FILTER_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing	ipt_unused
++	hook_local_in		const[0, int32]
++	hook_forward		offsetof[entries:p1, int32]
++	hook_local_out		offsetof[entries:p2, int32]
++	hook_post_routing	ipt_unused
++	underflow_pre_routing	ipt_unused
++	underflow_local_in	offsetof[entries:p1, int32]
++	underflow_forward	offsetof[entries:p2, int32]
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_tripso_entries_filter
++}
++
++ipt_tripso_entries_filter {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_tripso_no_matches, xa_tripso_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_tripso_replace_mangle {
++	name			string["mangle", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[TRIPSO_MANGLE_VALID_HOOKS, int32]
++	num_entries		const[6, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing	const[0, int32]
++	hook_local_in		offsetof[entries:p1, int32]
++	hook_forward		offsetof[entries:p2, int32]
++	hook_local_out		offsetof[entries:p3, int32]
++	hook_post_routing	offsetof[entries:p4, int32]
++	underflow_pre_routing	offsetof[entries:p1, int32]
++	underflow_local_in	offsetof[entries:p2, int32]
++	underflow_forward	offsetof[entries:p3, int32]
++	underflow_local_out	offsetof[entries:p4, int32]
++	underflow_post_routing	offsetof[entries:p5, int32]
++	num_counters		const[6, int32]
++	counters		ptr[out, array[xt_counters, 6]]
++	entries			ipt_tripso_entries_mangle
++}
++
++ipt_tripso_entries_mangle {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_tripso_no_matches, xa_tripso_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++	p4	ipt_entry_underflow
++	p5	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++ipt_tripso_replace_security {
++	name			string["security", XT_TABLE_MAXNAMELEN]
++	valid_hooks		const[TRIPSO_SECURITY_VALID_HOOKS, int32]
++	num_entries		const[4, int32]
++	size			bytesize[entries, int32]
++	hook_pre_routing	ipt_unused
++	hook_local_in		const[0, int32]
++	hook_forward		offsetof[entries:p1, int32]
++	hook_local_out		offsetof[entries:p2, int32]
++	hook_post_routing	ipt_unused
++	underflow_pre_routing	ipt_unused
++	underflow_local_in	offsetof[entries:p1, int32]
++	underflow_forward	offsetof[entries:p2, int32]
++	underflow_local_out	offsetof[entries:p3, int32]
++	underflow_post_routing	ipt_unused
++	num_counters		const[4, int32]
++	counters		ptr[out, array[xt_counters, 4]]
++	entries			ipt_tripso_entries_security
++}
++
++ipt_tripso_entries_security {
++	rule	ipt_xa_entry[ipt_xa_proto_any, xa_tripso_no_matches, xa_tripso_targets]
++	p1	ipt_entry_underflow
++	p2	ipt_entry_underflow
++	p3	ipt_entry_underflow
++} [packed, align[PTR_SIZE]]
++
++# TRIPSO takes no match; the rule is target-only. An empty varlen union holds
++# the match section to exactly zero bytes.
++xa_tripso_no_matches [
++	void	void
++] [varlen]
++
++# ==================== TARGET (tripso_info) ====================
++# xt_TRIPSO.h:  struct tripso_info { uint32_t tr_mode; };  sizeof == 4.
++# tr_mode is an enum, not a bitmask: TRIPSO_CIPSO == 1, TRIPSO_ASTRA == 2.
++# tripso_tg() switches on it -- CIPSO translates an incoming IPOPT_SEC (Astra)
++# label, ASTRA translates an incoming IPOPT_CIPSO label -- so both values are
++# needed to reach both write_cipso() and write_astra() and, through them,
++# mangle_options(). A third variant leaves tr_mode unconstrained so the "copy
++# verbatim" else-branch and the tr_mode validation are covered too.
++xa_tripso_targets [
++	cipso	xt_target_t["TRIPSO", tripso_info_cipso, 0]
++	astra	xt_target_t["TRIPSO", tripso_info_astra, 0]
++	any	xt_target_t["TRIPSO", tripso_info_any, 0]
++] [varlen]
++
++tripso_info_cipso {
++	tr_mode	const[TRIPSO_CIPSO, int32]
++}
++
++tripso_info_astra {
++	tr_mode	const[TRIPSO_ASTRA, int32]
++}
++
++tripso_info_any {
++	tr_mode	int32
++}
+diff --git a/sys/linux/netfilter_tripso.txt.const b/sys/linux/netfilter_tripso.txt.const
+new file mode 100644
+index 0000000..a169395
+--- /dev/null
++++ b/sys/linux/netfilter_tripso.txt.const
+@@ -0,0 +1,14 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++IPT_SO_SET_REPLACE = amd64:64
++SOL_IP = amd64:0
++TRIPSO_ASTRA = amd64:2
++TRIPSO_CIPSO = amd64:1
++TRIPSO_FILTER_VALID_HOOKS = amd64:14
++TRIPSO_MANGLE_VALID_HOOKS = amd64:31
++TRIPSO_RAW_VALID_HOOKS = amd64:9
++TRIPSO_SECURITY_VALID_HOOKS = amd64:14
++XT_EXTENSION_MAXNAMELEN = amd64:29
++XT_TABLE_MAXNAMELEN = amd64:32
++__NR_sendto = amd64:44
++__NR_setsockopt = amd64:54
+diff --git a/sys/linux/test/netfilter_tripso_translate b/sys/linux/test/netfilter_tripso_translate
+new file mode 100644
+index 0000000..14a1a09
+--- /dev/null
++++ b/sys/linux/test/netfilter_tripso_translate
+@@ -0,0 +1,16 @@
++# Seed: drive xt_TRIPSO's translation core deterministically, both directions.
++# Mirrors config/unit-tests/tests/tripso.sh: install a "-j TRIPSO" rule in
++# raw/PRE_ROUTING, then send an IP_HDRINCL packet carrying a matching security
++# option so tripso_tg() -> parse_* -> write_* -> mangle_options() runs on the
++# very first execution. The fuzzer mutates outward from here.
++#
++# Block 1: --to-astra rule + a CIPSO packet (DOI=1, level=1, RBITMAP cat 0x80)
++# -> parse_cipso / write_astra (header-shrink mangle path).
++r0 = socket$inet(0x2, 0x2, 0x0)
++setsockopt$IPT_SO_SET_REPLACE_TRIPSO_RAW(r0, 0x0, 0x40, &(0x7f0000000000)={'raw\x00', 0x9, 0x3, 0x0, 0x0, 0xffffffff, 0xffffffff, 0x0, 0xffffffff, 0x0, 0xffffffff, 0xffffffff, 0x0, 0xffffffff, 0x3, &(0x7f0000000000)=[{0x0, 0x0}, {0x0, 0x0}, {0x0, 0x0}], {{{{0x0, 0x0, 0x0, 0x0, '\x00', '\x00', '\x00', '\x00', 0x0, 0x0, 0x0}, 0x0, 0x0, 0x0, 0x0, {0x0, 0x0}, []}, @astra={0x0, 'TRIPSO\x00', 0x0, {0x2}}}, {{'\x00', 0x0, 0x0, 0x0, 0x0, {0x0, 0x0}}, {0x0, '\x00', 0x0, 0xfffffffe}}, {{'\x00', 0x0, 0x0, 0x0, 0x0, {0x0, 0x0}}, {0x0, '\x00', 0x0, 0xfffffffe}}}}, 0x0)
++r1 = socket$inet_raw_hdrincl(0x2, 0x3, 0xff)
++sendto$inet_hdrincl_tripso(r1, &(0x7f0000000100)=@udp={{0x0, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x0, 0x0, @loopback, @loopback, {[@cipso={0x86, 0xb, 0x1, [{0x1, 0x5, 0x0, 0x1, '\x80'}]}]}}, {@wide=0x4e20, @wide=0x9, 0x0, 0x0, "74657374"}}, 0x0, 0x0, &(0x7f0000000200)={0x2, 0x4e20, @loopback}, 0x10)
++# Block 2: --to-cipso rule + an Astra packet (IPOPT_SEC class 0xAB)
++# -> parse_rfc1108_astra / write_cipso (header-expand mangle path).
++setsockopt$IPT_SO_SET_REPLACE_TRIPSO_RAW(r0, 0x0, 0x40, &(0x7f0000000400)={'raw\x00', 0x9, 0x3, 0x0, 0x0, 0xffffffff, 0xffffffff, 0x0, 0xffffffff, 0x0, 0xffffffff, 0xffffffff, 0x0, 0xffffffff, 0x3, &(0x7f0000000480)=[{0x0, 0x0}, {0x0, 0x0}, {0x0, 0x0}], {{{{0x0, 0x0, 0x0, 0x0, '\x00', '\x00', '\x00', '\x00', 0x0, 0x0, 0x0}, 0x0, 0x0, 0x0, 0x0, {0x0, 0x0}, []}, @cipso={0x0, 'TRIPSO\x00', 0x0, {0x1}}}, {{'\x00', 0x0, 0x0, 0x0, 0x0, {0x0, 0x0}}, {0x0, '\x00', 0x0, 0xfffffffe}}, {{'\x00', 0x0, 0x0, 0x0, 0x0, {0x0, 0x0}}, {0x0, '\x00', 0x0, 0xfffffffe}}}}, 0x0)
++sendto$inet_hdrincl_tripso(r1, &(0x7f0000000600)=@udp={{0x0, 0x4, 0x0, 0x0, 0x0, 0x0, 0x0, 0x40, 0x0, 0x0, @loopback, @loopback, {[@astra={0x82, 0x5, 0xab, '\x01\x04'}]}}, {@wide=0x4e20, @wide=0x9, 0x0, 0x0, "74657374"}}, 0x0, 0x0, &(0x7f0000000700)={0x2, 0x4e20, @loopback}, 0x10)
+-- 
+2.43.0
+
