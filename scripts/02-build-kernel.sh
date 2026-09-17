@@ -87,6 +87,7 @@ fi
 echo "Grafting out-of-tree modules into kernel source tree..."
 "$CONTAINER_REPO_DIR/scripts/graft-oot-xtables-addons.sh"
 "$CONTAINER_REPO_DIR/scripts/graft-oot-ipt-so.sh"
+"$CONTAINER_REPO_DIR/scripts/graft-oot-tripso.sh"
 
 mkdir -p "$KERNEL_BUILD_DIR"
 
@@ -234,6 +235,13 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e CIPSO_IPV4 \
     -e NETWORK_SECMARK \
     -e NETFILTER_XT_MATCH_SO
+
+# -- tripso (grafted into net/netfilter/tripso/) ---
+# TRIPSO is a target that re-encodes a packet's security label between CIPSO
+# and RFC 1108/Astra. It reuses the same NETLABEL/CIPSO_IPV4 stack ipt-so
+# enables above.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e NETFILTER_XT_TARGET_TRIPSO
 
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
