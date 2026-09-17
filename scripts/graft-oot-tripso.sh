@@ -1,0 +1,195 @@
+#!/bin/bash
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Copyright (C) 2026 Vasiliy Kovalev <kovalev@altlinux.org>
+#
+# graft-oot-tripso.sh -- Grafts the TRIPSO iptables *target* (which re-encodes
+# a packet's IP security label between CIPSO and RFC 1108 / GOST R 58256-2018
+# (Astra Linux SE)) into the kernel source tree alongside the xtables-addons
+# extensions and ipt-so.
+#
+# xt_TRIPSO.c is placed in its own directory, net/netfilter/tripso/, with its
+# own Kbuild and Kconfig, wired into net/netfilter/Makefile and Kconfig -- the
+# same layout graft-oot-ipt-so.sh uses for xt_so.c. TRIPSO is a separate ALT
+# package and belongs on its own coverage line, not mixed in with the others.
+#
+# Unlike xt_so (a match), TRIPSO is a target: tripso_tg_reg has no .checkentry,
+# no .table, no .hooks and no .proto, so every line of tripso_tg() lives in the
+# packet path and the rule is legal in any table/hook. It *mutates* the packet
+# (mangle_options / pskb_expand_head / icmp_send), so it is reached only when a
+# packet carrying a security option traverses a hook that has a "-j TRIPSO"
+# rule AND the rule's tr_mode matches the option kind:
+#   tr_mode == TRIPSO_CIPSO (1): translates an incoming IPOPT_SEC (Astra) label
+#   tr_mode == TRIPSO_ASTRA (2): translates an incoming IPOPT_CIPSO label
+#
+# Source: git://git.altlinux.org/gears/t/tripso.git  ref: p11
+#         (upstream github.com/vt-alt/tripso). The sources are checked in
+#          unpacked, so xt_TRIPSO.c / xt_TRIPSO.h are used directly -- note this
+#          is the gears/t/tripso repository, NOT gears/k/kernel-modules-tripso,
+#          which only ships the .spec.
+#
+# Usage (called automatically by 02-build-kernel.sh):
+#   KERNEL_DIR=/path/to/kernel ./scripts/graft-oot-tripso.sh
+#   NO_CLONE=1 ./scripts/graft-oot-tripso.sh  (skip git clone)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -z "${KERNEL_DIR:-}" ]; then
+    source "$SCRIPT_DIR/01-setup-env.sh" >/dev/null
+fi
+: "${KERNEL_DIR:?KERNEL_DIR is not set}"
+
+: "${TMPDIR:=/tmp/graft-oot}"
+
+# Source repository. Sources are checked in unpacked (xt_TRIPSO.c / xt_TRIPSO.h
+# at the top level), the same layout as ipt-so.
+GIT_URL="git://git.altlinux.org/gears/t/tripso.git"
+GIT_REF="p11"
+SRC="$TMPDIR/tripso"
+DST="$KERNEL_DIR/net/netfilter/tripso"
+
+log() { echo "[graft tripso] $*"; }
+die() { echo "[graft tripso] ERROR: $*" >&2; exit 1; }
+
+command -v git &>/dev/null || die "required: git"
+[ -f "$KERNEL_DIR/Kconfig" ] || die "not a kernel source tree: $KERNEL_DIR"
+mkdir -p "$DST"
+
+mkdir -p "$TMPDIR"
+
+# 1. Clone or update
+#
+# If an existing checkout points at a different remote (e.g. a previous run
+# used the wrong repository), remove it so the correct source is cloned.
+if [ -d "$SRC/.git" ]; then
+    _cur_url=$(git -C "$SRC" config --get remote.origin.url 2>/dev/null || true)
+    if [ "$_cur_url" != "$GIT_URL" ]; then
+        log "existing checkout points at '$_cur_url', re-cloning from '$GIT_URL'"
+        rm -rf "$SRC"
+    fi
+fi
+if [ "${NO_CLONE:-0}" = "1" ] && [ -d "$SRC/.git" ]; then
+    log "NO_CLONE=1, skipping clone"
+elif [ -d "$SRC/.git" ]; then
+    log "updating $SRC"
+    git -C "$SRC" fetch --depth=1 origin "$GIT_REF"
+    git -C "$SRC" checkout FETCH_HEAD
+else
+    log "cloning $GIT_URL ref=$GIT_REF -> $SRC"
+    git clone --depth=1 --branch "$GIT_REF" "$GIT_URL" "$SRC"
+fi
+
+# 2. Copy xt_TRIPSO.c into its own directory
+TG_C=$(find "$SRC" -name 'xt_TRIPSO.c' 2>/dev/null | head -1)
+[ -n "$TG_C" ] || die "xt_TRIPSO.c not found in $SRC"
+log "grafting xt_TRIPSO.c -> $DST/"
+cp "$TG_C" "$DST/"
+
+# Patch xt_TRIPSO.c: VERSION comes from "git describe" in the out-of-tree
+# Makefile (VERSION = $(shell git -C $M describe --dirty), passed as
+# -DVERSION="...") and is unavailable in the kernel build environment, where
+# XT_TRIPSO_VERSION is #defined to the bare token VERSION. Replace the #define
+# with a literal string so MODULE_VERSION()/pr_info() compile.
+if grep -q '^#define XT_TRIPSO_VERSION VERSION$' "$DST/xt_TRIPSO.c"; then
+    sed -i 's|^#define XT_TRIPSO_VERSION VERSION$|#define XT_TRIPSO_VERSION "in-kernel"|' \
+        "$DST/xt_TRIPSO.c"
+    log "patched xt_TRIPSO.c: XT_TRIPSO_VERSION set to literal string"
+else
+    log "WARNING: XT_TRIPSO_VERSION define not found in the expected form;"
+    log "         check that the module still builds (VERSION token)"
+fi
+
+# 3. Install xt_TRIPSO.h
+TG_H=$(find "$SRC" -name 'xt_TRIPSO.h' 2>/dev/null | head -1)
+if [ -n "$TG_H" ]; then
+    # Place alongside xt_TRIPSO.c so "#include \"xt_TRIPSO.h\"" resolves.
+    cp "$TG_H" "$DST/"
+    log "installed xt_TRIPSO.h -> $DST/"
+    # Also install into UAPI for syz-extract and userspace tools.
+    UAPI="$KERNEL_DIR/include/uapi/linux/netfilter"
+    mkdir -p "$UAPI"
+    cp "$TG_H" "$UAPI/"
+    log "installed xt_TRIPSO.h -> include/uapi/linux/netfilter/"
+fi
+
+# 4. Write Kbuild and Kconfig for the new directory
+log "writing $DST/Kbuild"
+cat > "$DST/Kbuild" << 'KBUILD'
+# In-kernel Kbuild for tripso.
+# Generated by graft-oot-tripso.sh -- do not edit.
+ccflags-y := -I$(src)
+
+obj-$(CONFIG_NETFILTER_XT_TARGET_TRIPSO) += xt_TRIPSO.o
+KBUILD
+
+log "writing $DST/Kconfig"
+cat > "$DST/Kconfig" << 'TRCONF'
+# Generated by graft-oot-tripso.sh -- do not edit.
+menu "tripso (out-of-tree)"
+
+config NETFILTER_XT_TARGET_TRIPSO
+	tristate "TRIPSO: CIPSO/RFC1108-Astra security-label translation target (tripso)"
+	depends on IP_NF_IPTABLES && NETLABEL
+	default y
+
+endmenu
+TRCONF
+
+# 5. Wire the directory into net/netfilter
+NF_MAKEFILE="$KERNEL_DIR/net/netfilter/Makefile"
+if ! grep -q '^obj-y += tripso/' "$NF_MAKEFILE"; then
+    printf '\n# out-of-tree, grafted by graft-oot-tripso.sh\nobj-y += tripso/\n' >> "$NF_MAKEFILE"
+    log "added tripso/ to net/netfilter/Makefile"
+fi
+
+NF_KCONFIG="$KERNEL_DIR/net/netfilter/Kconfig"
+if ! grep -q 'net/netfilter/tripso/Kconfig' "$NF_KCONFIG"; then
+    printf '\nsource "net/netfilter/tripso/Kconfig"\n' >> "$NF_KCONFIG"
+    log "added tripso/Kconfig to net/netfilter/Kconfig"
+fi
+
+# 6. Install xt_tripso_compat.h so syz-extract can compile netfilter_tripso.txt.
+# xt_TRIPSO.h uses uint32_t and a bare enum, and syz-extract compiles the
+# description's includes with -nostdinc -D__KERNEL__, where <stdint.h> types
+# are unavailable. This tiny shim is included first in netfilter_tripso.txt and
+# provides just the fixed-width typedefs xt_TRIPSO.h needs. It is independent
+# of the xtables-addons xt_addons_compat.h so this graft does not rely on the
+# xtables-addons one having run.
+COMPAT_H="$KERNEL_DIR/include/uapi/linux/netfilter/xt_tripso_compat.h"
+if [ ! -f "$COMPAT_H" ]; then
+    log "installing $COMPAT_H"
+    cat > "$COMPAT_H" << 'COMPAT_HEADER'
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * xt_tripso_compat.h: kernel-context compat types for the TRIPSO UAPI header.
+ * Created by graft-oot-tripso.sh, included first in netfilter_tripso.txt.
+ */
+#ifndef _XT_TRIPSO_COMPAT_H
+#define _XT_TRIPSO_COMPAT_H
+
+#include <linux/types.h>
+#include <uapi/linux/ip.h>
+#ifndef __uint8_t_defined
+typedef __u8  uint8_t;
+typedef __u16 uint16_t;
+typedef __u32 uint32_t;
+typedef __u64 uint64_t;
+#define __uint8_t_defined
+#endif
+#endif /* _XT_TRIPSO_COMPAT_H */
+COMPAT_HEADER
+fi
+
+log "done"
+log ""
+log "Note: TRIPSO only mutates a packet that carries a security option and"
+log "whose hook has a '-j TRIPSO' rule with the matching tr_mode:"
+log "  iptables -t security -I INPUT  -j TRIPSO --to-cipso   # Astra -> CIPSO"
+log "  iptables -t security -I OUTPUT -j TRIPSO --to-astra   # CIPSO -> Astra"
+log "As with ipt-so, register a CIPSO DOI in the guest so labelled CIPSO"
+log "packets survive the receive path and reach a LOCAL_IN rule:"
+log "  netlabelctl cipso add pass doi:1 tags:1"
+log "  netlabelctl unlbl setdef address:0.0.0.0/0 label:unlabelled"

@@ -58,6 +58,7 @@
     ],
     "cover_filter": {
         "files": [
+            "^net/netfilter/tripso/",
             "^net/netfilter/ipt-so/",
             "^net/netfilter/xtables-addons/",
             "^net/netfilter/",
