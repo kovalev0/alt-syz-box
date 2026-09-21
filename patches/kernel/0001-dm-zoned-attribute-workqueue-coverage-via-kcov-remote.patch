@@ -1,0 +1,184 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Sat, 25 Oct 2026 10:00:00 +0000
+Subject: [PATCH] dm-zoned: attribute workqueue coverage via kcov remote
+
+Most of dm-zoned runs on kworker threads, not in the context of the
+process that submits the I/O: dmz_map only queues a chunk work, and the
+read, write, discard, flush and reclaim handling all happen in the chunk,
+flush and reclaim work functions. KCOV is per task, so that coverage is
+charged to the kworker and never reaches the fuzzer, which is why
+dm-zoned-metadata.c and dm-zoned-reclaim.c stay near 0% no matter what the
+fuzzer does.
+
+Capture the KCOV remote handle of the task that runs the constructor (the
+fuzzer process when it builds the target) and replay it in the three work
+functions with kcov_remote_start_common()/kcov_remote_stop(), exactly the
+way vhost attributes its worker thread. For a target built outside a fuzzer
+the handle is the common handle 0 and the calls are no-ops, so nothing
+changes for a normal dm-zoned device.
+
+This patch is only a fuzzing aid: it does not change dm-zoned behaviour and
+can be dropped if instrumenting the driver under test is not wanted. It is
+the only way to make the chunk, flush and reclaim handlers visible to the
+coverage report, so it is kept separate from the syzkaller-side changes.
+
+---
+ drivers/md/dm-zoned-reclaim.c | 23 +++++++++++++++++++++--
+ drivers/md/dm-zoned-target.c  | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 49 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/md/dm-zoned-reclaim.c b/drivers/md/dm-zoned-reclaim.c
+index d58db9a..4fa1100 100644
+--- a/drivers/md/dm-zoned-reclaim.c
++++ b/drivers/md/dm-zoned-reclaim.c
+@@ -8,6 +8,7 @@
+ #include "dm-zoned.h"
+ 
+ #include <linux/module.h>
++#include <linux/kcov.h>
+ 
+ #define	DM_MSG_PREFIX		"zoned reclaim"
+ 
+@@ -27,6 +28,14 @@ struct dmz_reclaim {
+ 
+ 	/* Last target access time */
+ 	unsigned long		atime;
++
++	/*
++	 * KCOV remote handle, captured from the task that runs dmz_ctr_reclaim
++	 * so that dmz_reclaim_work, which runs on a kworker thread, reports its
++	 * coverage against the fuzzer process that built the target. It is 0
++	 * (a no-op) when the target is built outside a fuzzer.
++	 */
++	u64			kcov_handle;
+ };
+ 
+ /*
+@@ -506,12 +515,17 @@ static void dmz_reclaim_work(struct work_struct *work)
+ 	unsigned int p_unmap;
+ 	int ret;
+ 
+-	if (dmz_dev_is_dying(zmd))
++	kcov_remote_start_common(zrc->kcov_handle);
++
++	if (dmz_dev_is_dying(zmd)) {
++		kcov_remote_stop();
+ 		return;
++	}
+ 
+ 	p_unmap = dmz_reclaim_percentage(zrc);
+ 	if (!dmz_should_reclaim(zrc, p_unmap)) {
+ 		mod_delayed_work(zrc->wq, &zrc->work, DMZ_IDLE_PERIOD);
++		kcov_remote_stop();
+ 		return;
+ 	}
+ 
+@@ -540,11 +554,15 @@ static void dmz_reclaim_work(struct work_struct *work)
+ 
+ 	ret = dmz_do_reclaim(zrc);
+ 	if (ret && ret != -EINTR) {
+-		if (!dmz_check_dev(zmd))
++		if (!dmz_check_dev(zmd)) {
++			kcov_remote_stop();
+ 			return;
++		}
+ 	}
+ 
+ 	dmz_schedule_reclaim(zrc);
++
++	kcov_remote_stop();
+ }
+ 
+ /*
+@@ -563,6 +581,7 @@ int dmz_ctr_reclaim(struct dmz_metadata *zmd,
+ 	zrc->metadata = zmd;
+ 	zrc->atime = jiffies;
+ 	zrc->dev_idx = idx;
++	zrc->kcov_handle = kcov_common_handle();
+ 
+ 	/* Reclaim kcopyd client */
+ 	zrc->kc = dm_kcopyd_client_create(&zrc->kc_throttle);
+diff --git a/drivers/md/dm-zoned-target.c b/drivers/md/dm-zoned-target.c
+index 6141fc2..7574de7 100644
+--- a/drivers/md/dm-zoned-target.c
++++ b/drivers/md/dm-zoned-target.c
+@@ -8,6 +8,7 @@
+ #include "dm-zoned.h"
+ 
+ #include <linux/module.h>
++#include <linux/kcov.h>
+ 
+ #define	DM_MSG_PREFIX		"zoned"
+ 
+@@ -62,6 +63,17 @@ struct dmz_target {
+ 	struct bio_list		flush_list;
+ 	struct delayed_work	flush_work;
+ 	struct workqueue_struct *flush_wq;
++
++	/*
++	 * KCOV remote handle. The chunk, flush and reclaim work run on kworker
++	 * threads, so without a remote handle their coverage is attributed to
++	 * the kworker and lost. The handle is captured from the task that runs
++	 * dmz_ctr (the fuzzer process when it builds the target) and replayed by
++	 * the work functions via kcov_remote_start_common(), the same way vhost
++	 * attributes its worker. It stays 0 for a target built outside a fuzzer,
++	 * where kcov_remote_start_common() is a no-op.
++	 */
++	u64			kcov_handle;
+ };
+ 
+ /*
+@@ -481,6 +493,8 @@ static void dmz_chunk_work(struct work_struct *work)
+ 	struct dmz_target *dmz = cw->target;
+ 	struct bio *bio;
+ 
++	kcov_remote_start_common(dmz->kcov_handle);
++
+ 	mutex_lock(&dmz->chunk_lock);
+ 
+ 	/* Process the chunk BIOs */
+@@ -495,6 +509,8 @@ static void dmz_chunk_work(struct work_struct *work)
+ 	dmz_put_chunk_work(cw);
+ 
+ 	mutex_unlock(&dmz->chunk_lock);
++
++	kcov_remote_stop();
+ }
+ 
+ /*
+@@ -506,6 +522,8 @@ static void dmz_flush_work(struct work_struct *work)
+ 	struct bio *bio;
+ 	int ret;
+ 
++	kcov_remote_start_common(dmz->kcov_handle);
++
+ 	/* Flush dirty metadata blocks */
+ 	ret = dmz_flush_metadata(dmz->metadata);
+ 	if (ret)
+@@ -525,6 +543,8 @@ static void dmz_flush_work(struct work_struct *work)
+ 	}
+ 
+ 	queue_delayed_work(dmz->flush_wq, &dmz->flush_work, DMZ_FLUSH_PERIOD);
++
++	kcov_remote_stop();
+ }
+ 
+ /*
+@@ -849,6 +869,14 @@ static int dmz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
+ 		kfree(dmz);
+ 		return -ENOMEM;
+ 	}
++
++	/*
++	 * Capture the KCOV remote handle of the task running the constructor.
++	 * When that task is a fuzzer process the chunk, flush and reclaim work
++	 * queued below report their coverage against it; otherwise this is the
++	 * common handle 0 and the replay in the work functions is a no-op.
++	 */
++	dmz->kcov_handle = kcov_common_handle();
+ 	dmz->ddev = kcalloc(argc, sizeof(struct dm_dev *), GFP_KERNEL);
+ 	if (!dmz->ddev) {
+ 		ti->error = "Unable to allocate the dm device descriptors";
+-- 
+2.43.0
