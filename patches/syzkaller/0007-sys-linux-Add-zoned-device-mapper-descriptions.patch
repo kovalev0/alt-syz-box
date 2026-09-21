@@ -1,0 +1,433 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Sat, 25 Oct 2026 10:00:00 +0000
+Subject: [PATCH] sys/linux, executor: add zoned device-mapper descriptions
+
+Describes the dm-zoned target and two pseudo-syscalls that make it reachable.
+
+A dm-zoned target only does useful work on a validly formatted host-managed
+zoned device, so the metadata and reclaim code is unreachable unless such a
+device already exists and the target is built in the context of the fuzzer
+(building it at boot hides dmz_ctr and dmz_ctr_metadata from KCOV).
+
+syz_dmz_create builds a target on a dedicated, already formatted backing
+device (one per proc, formatted by 05-build-image.sh) and leaves it live, in
+one step, so dmz_ctr, dmz_ctr_metadata, dmz_check_sb, dmz_init_zones and the
+mapping load are recorded. syz_dmz_io does one block-aligned read, write,
+discard or flush on the result, and a burst write that fills the cache zones
+and drives the reclaim worker. The control ioctls are addressed by name to
+those devices so dmz_status, dmz_message ("reclaim"), dmz_suspend, dmz_resume
+and the remove path are covered too, and a raw DM_TABLE_LOAD path exercises
+the dm-core parsing and the dmz_ctr error handling.
+
+Note: the chunk, flush and reclaim handlers run on kworker threads, so their
+coverage needs the kernel-side kcov remote patch (patches/kernel) to be
+attributed to the fuzzer; without it only the submission side is recorded.
+
+---
+ executor/common_linux.h          | 221 +++++++++++++++++++++++++++++++
+ pkg/vminfo/linux_syscalls.go     |   2 +
+ sys/linux/dev_dm_zoned.txt       | 116 ++++++++++++++++
+ sys/linux/dev_dm_zoned.txt.const |  23 ++++
+ 4 files changed, 362 insertions(+)
+ create mode 100644 sys/linux/dev_dm_zoned.txt
+ create mode 100644 sys/linux/dev_dm_zoned.txt.const
+
+diff --git a/executor/common_linux.h b/executor/common_linux.h
+index cff9a1b..df806f5 100644
+--- a/executor/common_linux.h
++++ b/executor/common_linux.h
+@@ -2648,6 +2648,227 @@ static long syz_md_setup(volatile long a0, volatile long a1, volatile long a2, v
+ }
+ #endif
+ 
++#if SYZ_EXECUTOR || __NR_syz_dmz_create
++#include <fcntl.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <unistd.h>
++
++// syz_dmz_create(index intptr) fd
++//
++// Builds a dm-zoned target on a dedicated, already formatted backing device and
++// leaves it live, returning an fd on the resulting block device.
++//
++// 05-build-image.sh formats one free host-managed zoned device per fuzzing proc
++// (/dev/nullb1 .. /dev/nullb8) and never builds a target on them, so each index
++// owns a backing device and the eight procs do not fight over a single one: a
++// dm-zoned ctr opens its backing with FMODE_EXCL, so a shared backing would admit
++// only one proc and leave dmz_ctr and dmz_ctr_metadata uncovered for the rest.
++//
++// Doing DM_DEV_CREATE, DM_TABLE_LOAD and the resume in one step is what makes
++// dmz_ctr reachable in the context of the fuzzer at all: a generated program
++// almost never lines up a device name across three separate ioctls, the absence
++// of DM_SUSPEND_FLAG on the resume (do_resume() is the only path that swaps the
++// inactive table in) and a backing path the on-disk metadata was written for.
++// Covering dmz_ctr here, rather than once at boot where KCOV does not see it, is
++// what pulls in dmz_ctr_metadata, dmz_check_sb, dmz_init_zones and the whole
++// mapping load that it drives.
++//
++// The name and minor are derived from index and kept clear of the 0..7 minor
++// range the generic dm targets use, so the three ioctls do not collide with
++// another target's device. Structures are spelled out locally rather than pulled
++// from <linux/dm-ioctl.h> so that generated C reproducers build anywhere.
++#define SYZ_DMZ_NAME_LEN 128
++#define SYZ_DMZ_UUID_LEN 129
++#define SYZ_DMZ_TYPE_LEN 16
++#define SYZ_DMZ_IOCTL_SIZE 312
++#define SYZ_DMZ_VERSION_MAJOR 4
++#define SYZ_DMZ_PERSISTENT_DEV_FLAG 8
++#define SYZ_DMZ_MINOR_BASE 110
++
++struct syz_dmz_ioctl {
++	uint32 version[3];
++	uint32 data_size;
++	uint32 data_start;
++	uint32 target_count;
++	int open_count;
++	uint32 flags;
++	uint32 event_nr;
++	uint32 padding;
++	uint64 dev;
++	char name[SYZ_DMZ_NAME_LEN];
++	char uuid[SYZ_DMZ_UUID_LEN];
++	char data[7];
++};
++
++struct syz_dmz_target_spec {
++	uint64 sector_start;
++	uint64 length;
++	int status;
++	uint32 next;
++	char target_type[SYZ_DMZ_TYPE_LEN];
++};
++
++#define SYZ_DMZ_IOCTL(nr) _IOWR(0xfd, nr, struct syz_dmz_ioctl)
++
++static void syz_dmz_hdr(struct syz_dmz_ioctl* dmi, const char* name)
++{
++	memset(dmi, 0, SYZ_DMZ_IOCTL_SIZE);
++	dmi->version[0] = SYZ_DMZ_VERSION_MAJOR;
++	dmi->data_size = SYZ_DMZ_IOCTL_SIZE;
++	dmi->data_start = SYZ_DMZ_IOCTL_SIZE;
++	strncpy(dmi->name, name, SYZ_DMZ_NAME_LEN - 1);
++}
++
++static long syz_dmz_create(volatile long a0)
++{
++	unsigned index = (unsigned)a0 % 8;
++	unsigned minor = SYZ_DMZ_MINOR_BASE + index;
++	char name[SYZ_DMZ_NAME_LEN];
++	char backing[32];
++	char node[64];
++	char buf[SYZ_DMZ_IOCTL_SIZE + sizeof(struct syz_dmz_target_spec) + 64];
++	struct syz_dmz_ioctl* dmi = (struct syz_dmz_ioctl*)buf;
++	struct syz_dmz_target_spec* spec;
++	char* pstr;
++	int ctl, fd;
++
++	if (SYZ_DMZ_IOCTL_SIZE != sizeof(struct syz_dmz_ioctl))
++		return -1;
++
++	ctl = open("/dev/mapper/control", O_RDWR);
++	if (ctl == -1)
++		return -1;
++	snprintf(name, sizeof(name), "syzdmz%u", index);
++	snprintf(backing, sizeof(backing), "/dev/nullb%u", index + 1);
++
++	// Create at a fixed minor so repeated runs reuse the same device instead
++	// of piling up new ones; an existing device from an earlier program only
++	// makes the table load below replace its inactive table.
++	syz_dmz_hdr(dmi, name);
++	dmi->flags = SYZ_DMZ_PERSISTENT_DEV_FLAG;
++	dmi->dev = minor;
++	ioctl(ctl, SYZ_DMZ_IOCTL(3), dmi);
++
++	// Load a single zoned target. dmz_ctr overwrites the table length from the
++	// backing device, so the length here is only a placeholder.
++	memset(buf, 0, sizeof(buf));
++	syz_dmz_hdr(dmi, name);
++	spec = (struct syz_dmz_target_spec*)(buf + SYZ_DMZ_IOCTL_SIZE);
++	pstr = (char*)(spec + 1);
++	spec->length = 65536;
++	strncpy(spec->target_type, "zoned", SYZ_DMZ_TYPE_LEN - 1);
++	snprintf(pstr, 48, "%s", backing);
++	spec->next = sizeof(struct syz_dmz_target_spec) + strlen(pstr) + 1;
++	dmi->target_count = 1;
++	dmi->data_size = SYZ_DMZ_IOCTL_SIZE + spec->next;
++	if (ioctl(ctl, SYZ_DMZ_IOCTL(9), dmi) != 0) {
++		syz_dmz_hdr(dmi, name);
++		ioctl(ctl, SYZ_DMZ_IOCTL(4), dmi);
++		close(ctl);
++		return -1;
++	}
++
++	// Resume with no DM_SUSPEND_FLAG, so dev_suspend() takes the do_resume()
++	// branch that swaps the inactive table in and makes the target live.
++	syz_dmz_hdr(dmi, name);
++	ioctl(ctl, SYZ_DMZ_IOCTL(6), dmi);
++	close(ctl);
++
++	snprintf(node, sizeof(node), "/dev/dm-%u", minor);
++	fd = open(node, O_RDWR);
++	if (fd == -1)
++		fd = open("/dev/mapper/syzdmzlive", O_RDWR);
++	return fd;
++}
++#endif
++
++#if SYZ_EXECUTOR || __NR_syz_dmz_io
++#include <fcntl.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <unistd.h>
++
++// syz_dmz_io(index intptr, op intptr, arg intptr)
++//
++// Does one block-aligned operation on a dm-zoned device so that dmz_map, the
++// chunk work, the read, write, discard and flush handlers and, once the cache
++// zones fill, the reclaim worker are entered. It opens the per-index device built
++// by syz_dmz_create, falling back to the device left live at boot, so I/O still
++// has a target before the fuzzer has built its own.
++//
++// Offsets are reduced to an aligned request inside the device; the block layer
++// rejects an unaligned or out-of-range bio before dmz_map runs, and a rejected bio
++// only starves the handlers. The burst op writes one block into every chunk in a
++// row, which is what fills the handful of cache zones and drives dmz_reclaim_work
++// past dmz_should_reclaim into dmz_do_reclaim.
++//
++// op: 0 read, 1 write, 2 write + flush, 3 discard, 4 flush, 5 burst write.
++#define SYZ_DMZ_IO_BLK 4096
++#define SYZ_DMZ_IO_CHUNK (4 * 1024 * 1024)
++#define SYZ_DMZ_IO_CHUNKS 16
++#define SYZ_DMZ_IO_MINOR_BASE 110
++#define SYZ_DMZ_IO_BLKDISCARD 4727
++
++static long syz_dmz_io(volatile long a0, volatile long a1, volatile long a2)
++{
++	static char dmz_io_buf[SYZ_DMZ_IO_BLK];
++	unsigned index = (unsigned)a0 % 8;
++	unsigned op = (unsigned long)a1 % 6;
++	unsigned long arg = (unsigned long)a2;
++	unsigned long long range[2];
++	unsigned long long off;
++	char node[64];
++	long ret = -1;
++	int fd, i;
++
++	snprintf(node, sizeof(node), "/dev/dm-%u", SYZ_DMZ_IO_MINOR_BASE + index);
++	fd = open(node, O_RDWR);
++	if (fd == -1)
++		fd = open("/dev/mapper/syzdmzlive", O_RDWR);
++	if (fd == -1)
++		fd = open("/dev/dm-100", O_RDWR);
++	if (fd == -1)
++		return -1;
++
++	off = (unsigned long long)(arg % SYZ_DMZ_IO_CHUNKS) * SYZ_DMZ_IO_CHUNK;
++
++	switch (op) {
++	case 0:
++		ret = pread(fd, dmz_io_buf, SYZ_DMZ_IO_BLK, off);
++		break;
++	case 1:
++		memset(dmz_io_buf, (int)arg, SYZ_DMZ_IO_BLK);
++		ret = pwrite(fd, dmz_io_buf, SYZ_DMZ_IO_BLK, off);
++		break;
++	case 2:
++		memset(dmz_io_buf, (int)arg, SYZ_DMZ_IO_BLK);
++		ret = pwrite(fd, dmz_io_buf, SYZ_DMZ_IO_BLK, off);
++		fsync(fd);
++		break;
++	case 3:
++		range[0] = off;
++		range[1] = SYZ_DMZ_IO_CHUNK;
++		ret = ioctl(fd, SYZ_DMZ_IO_BLKDISCARD, &range);
++		break;
++	case 4:
++		ret = fsync(fd);
++		break;
++	default:
++		memset(dmz_io_buf, (int)arg, SYZ_DMZ_IO_BLK);
++		for (i = 0; i < SYZ_DMZ_IO_CHUNKS; i++)
++			ret = pwrite(fd, dmz_io_buf, SYZ_DMZ_IO_BLK,
++				     (unsigned long long)i * SYZ_DMZ_IO_CHUNK);
++		fsync(fd);
++		break;
++	}
++	close(fd);
++	return ret;
++}
++#endif
++
+ #if SYZ_EXECUTOR || __NR_syz_open_dev
+ #include <fcntl.h>
+ #include <string.h>
+diff --git a/pkg/vminfo/linux_syscalls.go b/pkg/vminfo/linux_syscalls.go
+index b63ad05..9b7de51 100644
+--- a/pkg/vminfo/linux_syscalls.go
++++ b/pkg/vminfo/linux_syscalls.go
+@@ -71,6 +71,8 @@ var linuxSyscallChecks = map[string]func(*checkContext, *prog.Syscall) string{
+ 	"syz_open_procfs":               linuxSyzOpenProcfsSupported,
+ 	"syz_open_pts":                  alwaysSupported,
+ 	"syz_dm_setup":                  alwaysSupported,
++	"syz_dmz_create":                alwaysSupported,
++	"syz_dmz_io":                    alwaysSupported,
+ 	"syz_md_setup":              alwaysSupported,
+ 	"syz_execute_func":              alwaysSupported,
+ 	"syz_emit_ethernet":             linuxNetInjectionSupported,
+diff --git a/sys/linux/dev_dm_zoned.txt b/sys/linux/dev_dm_zoned.txt
+new file mode 100644
+index 0000000..e928bf0
+--- /dev/null
++++ b/sys/linux/dev_dm_zoned.txt
+@@ -0,0 +1,116 @@
++# dm-zoned target descriptions (drivers/md/dm-zoned-target.c,
++# dm-zoned-metadata.c, dm-zoned-reclaim.c).
++#
++# The target only does useful work on a validly formatted host-managed zoned
++# device, which random fuzzing never produces, so the whole metadata and reclaim
++# code is unreachable unless a formatted device already exists. 05-build-image.sh
++# formats the null_blk devices at boot: one target is left live for an immediate
++# I/O target, and one free formatted device per fuzzing proc is left for the
++# fuzzer to build its own target on. Building it in the fuzzer (not at boot, where
++# KCOV does not see it) is what records dmz_ctr, dmz_ctr_metadata, dmz_check_sb,
++# dmz_init_zones and the mapping load they drive.
++
++include <uapi/linux/dm-ioctl.h>
++include <uapi/linux/fs.h>
++include <uapi/linux/fcntl.h>
++
++# ==================== RESOURCES ====================
++
++resource fd_dmz[fd_dm]
++
++# ==================== CONSTRUCTOR + I/O (dm-zoned target) ====================
++
++# Build a dm-zoned target on the dedicated, already formatted backing device that
++# belongs to this index (/dev/nullb1 .. /dev/nullb8) and leave it live at minor
++# 110 + index, name syzdmz<index>. One device per index means the eight procs do
++# not fight over a single backing, which a dm-zoned ctr holds with FMODE_EXCL.
++syz_dmz_create(index intptr[0:7]) fd_dmz
++
++# One block-aligned operation on the device built above (or the one left live at
++# boot). Reaches dmz_map, the chunk work and the read/write/discard/flush
++# handlers; the burst op fills the cache zones and drives the reclaim worker.
++# op: 0 read, 1 write, 2 write+flush, 3 discard, 4 flush, 5 burst write.
++syz_dmz_io(index intptr[0:7], op intptr[0:5], arg intptr)
++
++# Plain I/O on the returned fd, so the submission path also sees fuzzer-chosen
++# buffers and lengths. The page cache realigns buffered I/O to blocks, so these
++# still reach dmz_map rather than being killed as unaligned.
++openat$dmz(fd const[AT_FDCWD], file ptr[in, string[dmz_live_paths]], flags flags[open_flags], mode const[0]) fd_dmz
++read$dmz(fd fd_dmz, buf ptr[out, array[int8]], count bytesize[buf])
++write$dmz(fd fd_dmz, buf ptr[in, array[int8]], count bytesize[buf])
++pread64$dmz(fd fd_dmz, buf ptr[out, array[int8]], count bytesize[buf], pos flags[dmz_offsets])
++pwrite64$dmz(fd fd_dmz, buf ptr[in, array[int8]], count bytesize[buf], pos flags[dmz_offsets])
++fsync$dmz(fd fd_dmz)
++ioctl$dmz_BLKDISCARD(fd fd_dmz, cmd const[BLKDISCARD], arg ptr[in, dmz_range])
++ioctl$dmz_BLKZEROOUT(fd fd_dmz, cmd const[BLKZEROOUT], arg ptr[in, dmz_range])
++ioctl$dmz_BLKFLSBUF(fd fd_dmz, cmd const[BLKFLSBUF], arg const[0])
++
++dmz_live_paths = "/dev/mapper/syzdmzlive", "/dev/dm-100", "/dev/dm-110", "/dev/dm-111", "/dev/dm-112", "/dev/dm-113"
++
++# ==================== RAW CONSTRUCTOR (dm core parsing + ctr errors) ====================
++
++# Building through a raw DM_TABLE_LOAD lets the fuzzer mutate the ctr device
++# string and the dm_ioctl header, covering the dm-core table parsing and the
++# dmz_ctr / dmz_fixup_devices / dmz_get_zoned_device error paths. It reuses the
++# generic dm_ioctl header and DM_DEV_CREATE from dev_dm.txt to get a device.
++ioctl$DM_TABLE_LOAD_dmzoned(fd fd_dm_control, cmd const[DM_TABLE_LOAD], arg ptr[inout, dm_load_dmzoned])
++type dm_load_dmzoned dm_ioctl_t[1, dm_ident_name, flags[dm_ioctl_flags, int32], dm_target_dmzoned]
++dm_target_dmzoned {
++	sector_start	const[0, int64]
++	length		flags[dm_target_lengths, int64]
++	status		const[0, int32]
++	next		len[parent, int32]
++	target_type	string["zoned", DM_MAX_TYPE_NAME]
++	params		string[dmz_ctr_params, 64]
++}
++
++# One token: a zoned backing (single-device path, reaches dmz_ctr_metadata).
++# Two tokens: regular + zoned; the brd ramdisk /dev/ram0 is the only non-zoned
++# device around, so it exercises the regular-cache-device branch of
++# dmz_get_zoned_device and dmz_fixup_devices instead of being rejected at open.
++dmz_ctr_params = "/dev/nullb9", "/dev/nullb1", "/dev/nullb8", "/dev/ram0 /dev/nullb9", "/dev/nullb9 /dev/nullb1", "/dev/nullb0", ""
++
++# ==================== CONTROL PLANE BY NAME ====================
++
++# Address the control ioctls to the devices built above (syzdmz<index>) and to the
++# one left live at boot (syzdmzlive). Reaches dmz_status (INFO and TABLE),
++# dmz_message (the only accepted message is "reclaim", which runs
++# dmz_schedule_reclaim) and the suspend, resume and remove paths (dmz_suspend,
++# dmz_resume, and dmz_dtr -> dmz_dtr_metadata -> dmz_cleanup_metadata).
++dmz_ident_name {
++	dev	const[0, int64]
++	name	string[dmz_dev_names, DM_NAME_LEN]
++	uuid	array[const[0, int8], DM_UUID_LEN]
++}
++dmz_dev_names = "syzdmzlive", "syzdmz0", "syzdmz1", "syzdmz2", "syzdmz3", "syzdmz4", "syzdmz5", "syzdmz6", "syzdmz7"
++
++type dmz_ioctl_none dm_ioctl_t[0, dmz_ident_name, flags[dm_ioctl_flags, int32], array[int8, 0:512]]
++type dmz_ioctl_resume dm_ioctl_t[0, dmz_ident_name, flags[dm_resume_flags, int32], array[int8, 0:64]]
++type dmz_ioctl_suspend dm_ioctl_t[0, dmz_ident_name, flags[dm_suspend_flags, int32], array[int8, 0:64]]
++type dmz_ioctl_msg dm_ioctl_t[0, dmz_ident_name, flags[dm_ioctl_flags, int32], dmz_target_msg]
++
++ioctl$dmz_DM_DEV_SUSPEND(fd fd_dm_control, cmd const[DM_DEV_SUSPEND], arg ptr[inout, dmz_ioctl_suspend])
++ioctl$dmz_DM_DEV_RESUME(fd fd_dm_control, cmd const[DM_DEV_SUSPEND], arg ptr[inout, dmz_ioctl_resume])
++ioctl$dmz_DM_DEV_STATUS(fd fd_dm_control, cmd const[DM_DEV_STATUS], arg ptr[inout, dmz_ioctl_none])
++ioctl$dmz_DM_TABLE_STATUS(fd fd_dm_control, cmd const[DM_TABLE_STATUS], arg ptr[inout, dmz_ioctl_none])
++ioctl$dmz_DM_DEV_WAIT(fd fd_dm_control, cmd const[DM_DEV_WAIT], arg ptr[inout, dmz_ioctl_none])
++ioctl$dmz_DM_DEV_REMOVE(fd fd_dm_control, cmd const[DM_DEV_REMOVE], arg ptr[inout, dmz_ioctl_none])
++ioctl$dmz_DM_TARGET_MSG(fd fd_dm_control, cmd const[DM_TARGET_MSG], arg ptr[inout, dmz_ioctl_msg])
++
++dmz_target_msg {
++	sector	const[0, int64]
++	message	string[dmz_messages, 16]
++}
++dmz_messages = "reclaim"
++
++# ==================== STRUCTS / VALUE POOLS ====================
++
++dmz_range {
++	start	flags[dmz_offsets, int64]
++	len	flags[dmz_lengths, int64]
++}
++
++# Block-aligned offsets inside the device, plus one unaligned/huge value for the
++# dmz_map rejection path. Lengths are whole blocks or a full chunk.
++dmz_offsets = 0, 4096, 8192, 2097152, 4194304, 8388608, 67108864, 18446744073709551104
++dmz_lengths = 4096, 8192, 65536, 524288, 4194304, 1, 0, 18446744073709551615
+diff --git a/sys/linux/dev_dm_zoned.txt.const b/sys/linux/dev_dm_zoned.txt.const
+new file mode 100644
+index 0000000..5381bd3
+--- /dev/null
++++ b/sys/linux/dev_dm_zoned.txt.const
+@@ -0,0 +1,23 @@
++# Code generated by syz-sysgen. DO NOT EDIT.
++arches = amd64
++AT_FDCWD = amd64:18446744073709551516
++BLKDISCARD = amd64:4727
++BLKFLSBUF = amd64:4705
++BLKZEROOUT = amd64:4735
++DM_DEV_REMOVE = amd64:3241737476
++DM_DEV_STATUS = amd64:3241737479
++DM_DEV_SUSPEND = amd64:3241737478
++DM_DEV_WAIT = amd64:3241737480
++DM_MAX_TYPE_NAME = amd64:16
++DM_NAME_LEN = amd64:128
++DM_TABLE_LOAD = amd64:3241737481
++DM_TABLE_STATUS = amd64:3241737484
++DM_TARGET_MSG = amd64:3241737486
++DM_UUID_LEN = amd64:129
++__NR_fsync = amd64:74
++__NR_ioctl = amd64:16
++__NR_openat = amd64:257
++__NR_pread64 = amd64:17
++__NR_pwrite64 = amd64:18
++__NR_read = amd64:0
++__NR_write = amd64:1
+-- 
+2.43.0

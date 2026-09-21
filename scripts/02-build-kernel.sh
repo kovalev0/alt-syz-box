@@ -200,6 +200,13 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
     -e BLK_DEV_MD -e MD_AUTODETECT -e MD_BITMAP_FILE \
     -e MD_RAID0 -e MD_RAID1 -e MD_RAID10 -e MD_RAID456 -e DM_RAID
 
+# -- zoned block + dm-zoned ------------------------
+# dm-zoned on host-managed zoned devices (null_blk zoned=1, with conventional
+# zones for metadata); the backing device is formatted at boot.
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    -e BLK_DEV_ZONED -e DM_ZONED \
+    -e BLK_DEV_NULL_BLK -e BLK_DEV_NULL_BLK_FAULT_INJECTION
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
