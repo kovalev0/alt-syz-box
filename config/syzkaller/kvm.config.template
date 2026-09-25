@@ -8,32 +8,34 @@
     "sshkey": "${SSH_KEY_PATH}",
     "ssh_user": "root",
     "syzkaller": "${SYZKALLER_DIR}",
-    "procs": 8,
+    "procs": 16,
     "type": "qemu",
     "sandbox": "none",
     "cover": true,
     "execprog_bin_on_target": "/bin/linux_amd64/syz-execprog",
     "executor_bin_on_target": "/bin/linux_amd64/syz-executor",
     "vm": {
-        "qemu": "${QEMU_BUILD_DIR}/usr/bin/qemu-system-x86_64",
+	"qemu": "${QEMU_BUILD_DIR}/usr/bin/qemu-system-x86_64",
         "count": 4,
         "qemu_args": "-enable-kvm -cpu host",
         "kernel": "${KERNEL_BZIMAGE}",
         "cpu": 4,
-        "cmdline": "root=/dev/sda3 brd.rd_nr=8 brd.rd_size=32768 brd.max_part=1 dm-mod.create=\"syzsecdel0,,0,rw, 0 65536 secdel 1:0 0 1R0;syzkeep,,1,rw, 0 65536 secdel 1:1 0 01R10;syzio,,2,rw, 0 65536 secdel 1:2 0 1R0;syzpart,,3,rw, 0 4096 secdel 1:3 8 0R1\"",
+        "cmdline": "root=/dev/sda3",
         "mem": 4096
     },
+    "enable_syscalls": [
+        "openat${DOL_SIGN}kvm*",
+        "openat${DOL_SIGN}sgx_provision",
+        "openat${DOL_SIGN}sev",
+        "ioctl${DOL_SIGN}KVM_*",
+        "mmap${DOL_SIGN}KVM_*",
+        "syz_kvm_*",
+        "syz_memcpy_off${DOL_SIGN}KVM_*"
+    ],
     "cover_filter": {
         "files": [
             "^arch/x86/kvm/*",
-            "^virt/*",
-            "^drivers/md/",
-            "^net/netfilter/tripso/",
-            "^net/netfilter/ipt-so/",
-            "^net/netfilter/xtables-addons/",
-            "^net/netfilter/",
-            "^net/ipv4/netfilter/",
-            "^net/ipv6/netfilter/"
+            "^virt/*"
         ]
     }
 }
