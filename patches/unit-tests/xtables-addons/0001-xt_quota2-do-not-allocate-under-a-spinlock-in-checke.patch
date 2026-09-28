@@ -1,0 +1,98 @@
+From 0ba553d977b8b5e3c2df7c763821e958097b4cf0 Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Tue, 4 Aug 2026 14:30:45 +0000
+Subject: [PATCH 1/2] xt_quota2: do not allocate under a spinlock in checkentry
+
+quota_mt2_check() -> q2_get_counter() calls kmalloc(GFP_KERNEL) and
+proc_create_data() while holding counter_list_lock, a spinlock. On a kernel with
+CONFIG_DEBUG_ATOMIC_SLEEP this triggers 'BUG: sleeping function called from
+invalid context' and can deadlock. counter_list_lock only serialises the named
+counter list, which is manipulated exclusively from process context
+(checkentry/destroy) -- the packet path uses the per-counter e->lock -- so it can
+be a mutex. Convert it, which allows the sleeping allocation and procfs creation
+to stay where they are.
+
+Signed-off-by: Vasiliy Kovalev <kovalev@altlinux.org>
+---
+ extensions/xt_quota2.c | 20 ++++++++++----------
+ 1 file changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/extensions/xt_quota2.c b/extensions/xt_quota2.c
+index 182771e..af6f0a9 100644
+--- a/extensions/xt_quota2.c
++++ b/extensions/xt_quota2.c
+@@ -52,7 +52,7 @@ static inline struct quota2_net *quota2_pernet(struct net *net)
+ 	return net_generic(net, quota2_net_id);
+ }
+ 
+-static DEFINE_SPINLOCK(counter_list_lock);
++static DEFINE_MUTEX(counter_list_lock);
+ 
+ static unsigned int quota_list_perms = S_IRUGO | S_IWUSR;
+ static unsigned int quota_list_uid   = 0;
+@@ -161,11 +161,11 @@ q2_get_counter(struct net *net, const struct xt_quota_mtinfo2 *q)
+ 	if (*q->name == '\0')
+ 		return q2_new_counter(q, true);
+ 
+-	spin_lock_bh(&counter_list_lock);
++	mutex_lock(&counter_list_lock);
+ 	list_for_each_entry(e, &quota2_net->counter_list, list)
+ 		if (strcmp(e->name, q->name) == 0) {
+ 			atomic_inc(&e->ref);
+-			spin_unlock_bh(&counter_list_lock);
++			mutex_unlock(&counter_list_lock);
+ 			return e;
+ 		}
+ 
+@@ -183,11 +183,11 @@ q2_get_counter(struct net *net, const struct xt_quota_mtinfo2 *q)
+ 	proc_set_user(p, make_kuid(&init_user_ns, quota_list_uid),
+ 	              make_kgid(&init_user_ns, quota_list_gid));
+ 	list_add_tail(&e->list, &quota2_net->counter_list);
+-	spin_unlock_bh(&counter_list_lock);
++	mutex_unlock(&counter_list_lock);
+ 	return e;
+ 
+  out:
+-	spin_unlock_bh(&counter_list_lock);
++	mutex_unlock(&counter_list_lock);
+ 	kfree(e);
+ 	return NULL;
+ }
+@@ -225,15 +225,15 @@ static void quota_mt2_destroy(const struct xt_mtdtor_param *par)
+ 		return;
+ 	}
+ 
+-	spin_lock_bh(&counter_list_lock);
++	mutex_lock(&counter_list_lock);
+ 	if (!atomic_dec_and_test(&e->ref)) {
+-		spin_unlock_bh(&counter_list_lock);
++		mutex_unlock(&counter_list_lock);
+ 		return;
+ 	}
+ 
+ 	list_del(&e->list);
+ 	remove_proc_entry(e->name, quota2_net->proc_xt_quota);
+-	spin_unlock_bh(&counter_list_lock);
++	mutex_unlock(&counter_list_lock);
+ 	kfree(e);
+ }
+ 
+@@ -314,13 +314,13 @@ static void __net_exit quota2_net_exit(struct net *net)
+ 	remove_proc_entry("xt_quota", net->proc_net);
+ 
+ 	/* destroy counter_list while freeing it's content */
+-	spin_lock_bh(&counter_list_lock);
++	mutex_lock(&counter_list_lock);
+ 	list_for_each_safe(pos, q, &quota2_net->counter_list) {
+ 		e = list_entry(pos, struct xt_quota_counter, list);
+ 		list_del(pos);
+ 		kfree(e);
+ 	}
+-	spin_unlock_bh(&counter_list_lock);
++	mutex_unlock(&counter_list_lock);
+ }
+ 
+ static struct pernet_operations quota2_net_ops = {
+-- 
+2.43.0
+

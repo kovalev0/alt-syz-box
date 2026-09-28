@@ -1,0 +1,32 @@
+From bd7af45eec46eb5be3d2fe68cac13a6575e1297e Mon Sep 17 00:00:00 2001
+From: Vasiliy Kovalev <kovalev@altlinux.org>
+Date: Wed, 16 Sep 2026 07:58:55 +0000
+Subject: [PATCH 2/2] tripso: derive VERSION without requiring git tags
+
+The unit-tests harness builds from a checkout without tags, so the Makefile's
+`git describe` prints 'fatal: No names found, cannot describe anything.' on
+every parse and leaves VERSION (hence MODULE_VERSION) empty. Fall back to a
+fixed string when describe fails; keeps the build log clean and gives the
+module a meaningful version.
+
+Signed-off-by: Vasiliy Kovalev <kovalev@altlinux.org>
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 785b8cb..6d7e26a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -12,7 +12,7 @@ CFLAGS	?= -O2 -g
+ endif
+ XFLAGS	?= $(shell pkg-config xtables --cflags 2>/dev/null)
+ XDIR	?= $(shell pkg-config --variable xtlibdir xtables)
+-VERSION	= $(shell git -C $M describe --dirty)
++VERSION	= $(shell git -C $M describe --dirty 2>/dev/null || echo unit-tests)
+ VOPT	= '-DVERSION="$(VERSION)"'
+ obj-m	= xt_TRIPSO.o
+ CFLAGS_xt_TRIPSO.o = -DDEBUG $(VOPT)
+-- 
+2.43.0
+
