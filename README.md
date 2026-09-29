@@ -149,6 +149,7 @@ to run.
 |---|:---:|---|
 | `dm-secdel` | ✅ | Device-mapper secure-delete target |
 | `ipt-so` | ✅ | `xt_so.ko` — CIPSO/Astra IP security-label iptables match |
+| `tripso` | ✅ | `xt_TRIPSO.ko` — CIPSO⇄Astra IP security-label iptables target |
 | `xtables-addons` | ✅ | 25+ out-of-tree iptables match/target modules |
 | `kselftests` | ❌ | Linux kernel self-tests (full-kernel gcov; opt-in only) |
 
