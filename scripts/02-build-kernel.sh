@@ -165,6 +165,11 @@ cat "$KERNEL_DIR"/arch/x86/configs/x86_64_defconfig >> "$KERNEL_BUILD_DIR/.confi
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     --set-str LSM "landlock,lockdown,yama,loadpin,safesetid,smack,tomoyo,apparmor,ipe,bpf,altha,kiosk"
 
+# fix: No rule to make target 'certs/trusted.pem', needed by 'certs/x509_certificate_list'
+# Drop the external trusted keys file so the build does not depend on it
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    --set-str SYSTEM_TRUSTED_KEYS ""
+
 # Enable gcov coverage (only gcov version)
 if [[ "$KERNEL_LOCALVERSION" == *gcov* ]]; then
     ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
