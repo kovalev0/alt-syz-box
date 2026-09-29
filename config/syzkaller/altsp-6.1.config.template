@@ -16,7 +16,7 @@
     "executor_bin_on_target": "/bin/linux_amd64/syz-executor",
     "vm": {
 	"qemu": "${QEMU_BUILD_DIR}/usr/bin/qemu-system-x86_64",
-        "count": 4,
+        "count": 8,
         "qemu_args": "-enable-kvm -cpu host",
         "kernel": "${KERNEL_BZIMAGE}",
         "cpu": 4,
