@@ -161,6 +161,11 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     --set-str LSM "landlock,lockdown,yama,loadpin,safesetid,smack,tomoyo,apparmor,ipe,bpf,altha,kiosk"
 
+# fix: No rule to make target 'certs/trusted.pem', needed by 'certs/x509_certificate_list'
+# Drop the external trusted keys file so the build does not depend on it
+./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
+    --set-str SYSTEM_TRUSTED_KEYS ""
+
 # -- netfilter -------------------------------------
 ./scripts/config --file "$KERNEL_BUILD_DIR/.config" \
     -e NF_TABLES -e NF_TABLES_INET \
