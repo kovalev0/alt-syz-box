@@ -21,6 +21,10 @@ export KERNEL_LOCALVERSION="alt-syz-box-gcov-altsp-6.12-unit-tests"
 # Select which syzkaller config template to use from 'config/syzkaller/'
 export SYZ_CONFIG_TEMPLATE="altsp-6.12"
 
+# Space-separated list of sys/linux/*.txt files for which to regenerate
+# .const via syz-extract during the syzkaller build
+export SYZ_EXTRACT_TARGETS=""
+
 # ALT Linux branch ('p11', 'p10', 'sisyphus', etc.)
 export ALT_BRANCH="p11"
 
