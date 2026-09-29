@@ -16,7 +16,7 @@ export TERM="xterm-256color"
 # unit-tests flow (scripts/06-run-unit-tests.sh) needs a gcov-instrumented
 # kernel and signals that by putting the substring "gcov" here, which
 # scripts/02-build-kernel.sh keys on to enable GCOV_KERNEL/GCOV_PROFILE_ALL.
-export KERNEL_LOCALVERSION="alt-syz-box-gcov-altsp-6.12-unit-tests"
+export KERNEL_LOCALVERSION="alt-syz-box-gcov-altsp-6.12.111-unit-tests"
 
 # Select which syzkaller config template to use from 'config/syzkaller/'
 export SYZ_CONFIG_TEMPLATE="altsp-6.12"
@@ -36,7 +36,7 @@ export CONTAINER_REPO_DIR="/home/user/alt-syz-box"
 # Kernel git repository URL and tag/branch
 # Default is ALT Linux kernel, but you can change it to mainline or any other kernel
 export KERNEL_GIT_URL="git://git.altlinux.org/people/kernelbot/packages/kernel-image.git"
-export KERNEL_GIT_TAG="kernel-image-6.12-6.12.59-alt0.c10f.2"
+export KERNEL_GIT_TAG="kernel-image-6.12-6.12.111-alt1"
 
 # To use the LVC fork version, uncomment these lines:
 # export KERNEL_GIT_URL="https://git.linuxtesting.ru/pub/scm/linux/kernel/git/lvc/linux-stable.git"
