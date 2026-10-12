@@ -151,7 +151,13 @@ to run.
 | `ipt-so` | ✅ | `xt_so.ko` — CIPSO/Astra IP security-label iptables match |
 | `tripso` | ✅ | `xt_TRIPSO.ko` — CIPSO⇄Astra IP security-label iptables target |
 | `xtables-addons` | ✅ | 25+ out-of-tree iptables match/target modules |
+| `secure_delete` | ✅ | THC `srm`/`sfill`/`sswap`/`smem` secure-wipe userspace suite |
 | `kselftests` | ❌ | Linux kernel self-tests (full-kernel gcov; opt-in only) |
+
+Most targets are out-of-tree **kernel modules**. `secure_delete` is the exception
+— an out-of-tree **userspace** suite built with `gcc --coverage`; its coverage is
+collected from the `.gcda` the instrumented binaries write at exit rather than
+from the kernel's gcov debugfs (see *Coverage modes* below).
 
 **`TARGET_DEFAULT=0`** targets are skipped in the default run. They run only
 when named explicitly in `TARGETS`:
@@ -178,6 +184,18 @@ coverage data.
 Sanitizers (KASAN, UBSAN, LOCKDEP, fault injection) are **off by default** to
 avoid slowdown and spurious panics from out-of-tree modules. Enable them with
 `--sanitizers` (sets `ENABLE_SANITIZERS=1` in `02-build-kernel.sh`).
+
+#### Coverage modes
+
+A target's `.conf` selects how its coverage is collected via `TARGET_COVERAGE_MODE`:
+
+| Mode | Used by | How coverage is collected |
+|---|---|---|
+| `module` (default) | `dm-secdel`, `ipt-so`, `tripso`, `xtables-addons` | kernel gcov: the module's `.gcda` are read from `/sys/kernel/debug/gcov` and paired with the build `.gcno` |
+| `kernel` | `kselftests` | full-kernel gcov: the whole gcov debugfs tree is pulled and each `.gcda` paired with the matching kernel `.gcno` |
+| `userspace` | `secure_delete` | the tools are built with `gcc --coverage`; their `.gcda` are written to the filesystem at exit (redirected via `GCOV_PREFIX`), pulled back, and paired with the build `.gcno` |
+
+The host-side report rendering (lcov -> HTML -> PDF) is identical for all three.
 
 #### Reports
 

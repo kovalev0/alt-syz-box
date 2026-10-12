@@ -16,6 +16,16 @@
 
 GCOV_DEBUGFS="${GCOV_DEBUGFS:-/sys/kernel/debug/gcov}"
 
+# Staging directory inside the guest for USERSPACE coverage (TARGET_COVERAGE_MODE
+# ="userspace"). Unlike kernel/module coverage, an out-of-tree *userspace* tool
+# (e.g. the secure_delete srm/sfill/sswap/smem suite) is built with gcc's own
+# --coverage: the instrumented binary writes its *.gcda to the filesystem at exit
+# via libgcov, not to the kernel's gcov debugfs. The guest driver points libgcov
+# here by exporting GCOV_PREFIX=$GCOV_USERSPACE_DIR with GCOV_PREFIX_STRIP large
+# enough to flatten the host build path to bare basenames, so the *.gcda land
+# directly under this directory and pair cleanly with the host-side *.gcno.
+GCOV_USERSPACE_DIR="${GCOV_USERSPACE_DIR:-/root/gcov-out}"
+
 # --- commands intended to run inside the guest (via vm_ssh) ---
 
 # gcov_guest_reset_cmd — shell snippet that zeroes all kernel gcov counters.
@@ -61,6 +71,22 @@ n=\$(find \"\$ST\" -name '*.gcda' 2>/dev/null | wc -l); \
 echo \"[guest] staged \$n .gcda from '$src'\" 1>&2; \
 if [ \"\$n\" -gt 0 ]; then tar czf '$out' -C \"\$ST\" .; \
 else tar czf '$out' --files-from /dev/null; fi"
+}
+
+# gcov_guest_tar_userspace_cmd GCDA_DIR OUT_TGZ — shell snippet (run in the
+# guest) that collects a USERSPACE target's *.gcda into OUT_TGZ.
+#
+# These *.gcda were written by libgcov (gcc --coverage) as ordinary files under
+# GCDA_DIR (the guest driver's GCOV_PREFIX), so — unlike the debugfs case — their
+# st_size is correct and a plain `tar` captures them faithfully; no `cat < file`
+# staging is required. We flatten with `-C "$GCDA_DIR" .` so the archive holds
+# the bare "./foo.gcda" layout the host-side gcov_report() pairs with the build
+# *.gcno of the same basename. On a miss an empty tar is written so the caller's
+# extract step has something to open.
+gcov_guest_tar_userspace_cmd() {
+    local dir="$1" out="$2"
+    printf '%s' "if find '$dir' -name '*.gcda' 2>/dev/null | grep -q .; then \
+tar czf '$out' -C '$dir' .; else tar czf '$out' --files-from /dev/null; fi"
 }
 
 # --- host side ---
