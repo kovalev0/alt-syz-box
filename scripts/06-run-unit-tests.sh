@@ -216,6 +216,24 @@ test_target() {
 
         gcov_report_kernel "$work/pulled" "$KERNEL_BUILD_DIR" "$reports" "$TARGET_NAME" \
             || echo "⚠️  No kernel coverage produced for $TARGET_NAME." >&2
+    elif [ "${TARGET_COVERAGE_MODE:-module}" = "userspace" ]; then
+        # userspace mode (e.g. secure_delete): the target is an out-of-tree
+        # *userspace* program built with gcc --coverage, not a kernel module. Its
+        # .gcda are written by libgcov as ordinary files under $GCOV_USERSPACE_DIR
+        # in the guest (the driver set GCOV_PREFIX there), so we pull them straight
+        # from the filesystem instead of the gcov debugfs. The host side is then
+        # identical to the per-module path: pair the pulled .gcda with the build
+        # .gcno in $TARGET_SRC and render with gcov_report(). gcov_report() looks
+        # for .gcda under the debugfs mirror first and falls back to the tarball
+        # root, which is exactly our flat "./foo.gcda" layout.
+        echo "  -> pulling userspace gcda from the guest ($GCOV_USERSPACE_DIR)"
+        vm_ssh "$(gcov_guest_tar_userspace_cmd "$GCOV_USERSPACE_DIR" /root/gcov.tgz)" || true
+        rm -rf "$work/pulled"; mkdir -p "$work/pulled"
+        vm_scp_from /root/gcov.tgz "$work/gcov.tgz" || true
+        [ -s "$work/gcov.tgz" ] && tar xzf "$work/gcov.tgz" -C "$work/pulled" 2>/dev/null
+
+        gcov_report "$TARGET_SRC" "$work/pulled" "$TARGET_SRC" \
+            "$TARGET_COV_PATTERN" "$reports" "$TARGET_NAME"
     else
         vm_ssh "$(gcov_guest_tar_cmd "$TARGET_SRC" /root/gcov.tgz)" || true
         rm -rf "$work/pulled"; mkdir -p "$work/pulled"

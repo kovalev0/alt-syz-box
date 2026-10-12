@@ -48,6 +48,29 @@ If a module's `.gcda` never appear, add `GCOV_PROFILE := y` to its Kbuild.
 6. merge `.gcno` + `.gcda`, extract `TARGET_COV_PATTERN`, render HTML into
    `$UNIT_TESTS_DIR/<name>/reports/`.
 
+## TARGET_COVERAGE_MODE
+
+Optional; defaults to `module`. Selects how a target's coverage is collected:
+
+- `module` (default) — out-of-tree **kernel module**. Its `.gcda` are read from
+  the kernel gcov debugfs (`/sys/kernel/debug/gcov<build-path>`) and paired with
+  the build `.gcno`. Used by `dm-secdel`, `ipt-so`, `tripso`, `xtables-addons`.
+- `kernel` — full-kernel gcov (needs `TARGET_KCONFIG="GCOV_PROFILE_ALL"`). The
+  whole gcov debugfs tree is pulled and each `.gcda` paired with the matching
+  kernel `.gcno`. Used by `kselftests`.
+- `userspace` — out-of-tree **userspace** program built with `gcc --coverage`.
+  There is nothing in the kernel gcov debugfs; instead the instrumented binaries
+  write their `.gcda` to the filesystem at exit via libgcov. The in-guest driver
+  redirects those writes to `$GCOV_USERSPACE_DIR` (see `scripts/lib/gcov-lib.sh`)
+  by exporting `GCOV_PREFIX`/`GCOV_PREFIX_STRIP`; the orchestrator pulls that
+  directory and pairs the `.gcda` with the build `.gcno`. Used by `secure_delete`.
+
+For a `userspace` target, `target_build` must compile the sources **with
+`--coverage`** (so the `.gcno` and instrumented binaries land in `$TARGET_SRC`),
+and the guest driver must set `GCOV_PREFIX=$GCOV_USERSPACE_DIR` with a
+`GCOV_PREFIX_STRIP` large enough to flatten the host build path — see
+`targets/secure_delete.conf` and `tests/secure_delete.sh` for a worked example.
+
 ## TARGET_NETFILTER
 
 Set `TARGET_NETFILTER=1` in a target's `.conf` when the module needs a realistic
