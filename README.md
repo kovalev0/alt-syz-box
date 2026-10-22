@@ -152,12 +152,20 @@ to run.
 | `tripso` | ✅ | `xt_TRIPSO.ko` — CIPSO⇄Astra IP security-label iptables target |
 | `xtables-addons` | ✅ | 25+ out-of-tree iptables match/target modules |
 | `secure_delete` | ✅ | THC `srm`/`sfill`/`sswap`/`smem` secure-wipe userspace suite |
+| `iptables` | ✅ | netfilter userspace tools; runs the project's own `make check` |
+| `cryptsetup` | ✅ | LUKS/dm-crypt userspace; runs the project's own `make check` |
 | `kselftests` | ❌ | Linux kernel self-tests (full-kernel gcov; opt-in only) |
 
-Most targets are out-of-tree **kernel modules**. `secure_delete` is the exception
-— an out-of-tree **userspace** suite built with `gcc --coverage`; its coverage is
-collected from the `.gcda` the instrumented binaries write at exit rather than
-from the kernel's gcov debugfs (see *Coverage modes* below).
+Most targets are out-of-tree **kernel modules**. `secure_delete`, `iptables` and
+`cryptsetup` are out-of-tree **userspace** packages built with `gcc --coverage`;
+their coverage is collected from the `.gcda` the instrumented binaries write at
+exit rather than from the kernel's gcov debugfs (see *Coverage modes* below).
+`iptables` and `cryptsetup` are the userspace counterparts of the module targets
+— `iptables` drives the same netfilter subsystem as `ipt-so`/`tripso`/
+`xtables-addons`, `cryptsetup` drives the same device-mapper subsystem as
+`dm-secdel` — and each reuses the package's **own upstream test suite** (its
+autotools `make check`), run in the guest against the freshly built, coverage-
+instrumented in-tree binaries.
 
 **`TARGET_DEFAULT=0`** targets are skipped in the default run. They run only
 when named explicitly in `TARGETS`:
@@ -193,7 +201,7 @@ A target's `.conf` selects how its coverage is collected via `TARGET_COVERAGE_MO
 |---|---|---|
 | `module` (default) | `dm-secdel`, `ipt-so`, `tripso`, `xtables-addons` | kernel gcov: the module's `.gcda` are read from `/sys/kernel/debug/gcov` and paired with the build `.gcno` |
 | `kernel` | `kselftests` | full-kernel gcov: the whole gcov debugfs tree is pulled and each `.gcda` paired with the matching kernel `.gcno` |
-| `userspace` | `secure_delete` | the tools are built with `gcc --coverage`; their `.gcda` are written to the filesystem at exit (redirected via `GCOV_PREFIX`), pulled back, and paired with the build `.gcno` |
+| `userspace` | `secure_delete`, `iptables`, `cryptsetup` | the tools are built with `gcc --coverage`; their `.gcda` are written to the filesystem at exit (redirected via `GCOV_PREFIX`), pulled back, and paired with the build `.gcno` |
 
 The host-side report rendering (lcov -> HTML -> PDF) is identical for all three.
 
