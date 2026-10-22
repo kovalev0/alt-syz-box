@@ -63,8 +63,8 @@ Optional; defaults to `module`. Selects how a target's coverage is collected:
   write their `.gcda` to the filesystem at exit via libgcov. The in-guest driver
   redirects those writes to `$GCOV_USERSPACE_DIR` (see `scripts/lib/gcov-lib.sh`)
   by exporting `GCOV_PREFIX`/`GCOV_PREFIX_STRIP`; the orchestrator pulls that
-  directory and pairs the `.gcda` with the build `.gcno`. Used by `secure_delete`
-  and `iptables`.
+  directory and pairs the `.gcda` with the build `.gcno`. Used by `secure_delete`,
+  `iptables` and `cryptsetup`.
 
 For a `userspace` target, `target_build` must compile the sources **with
 `--coverage`** (so the `.gcno` and instrumented binaries land in `$TARGET_SRC`),
@@ -75,8 +75,8 @@ and the guest driver must set `GCOV_PREFIX=$GCOV_USERSPACE_DIR`.
   strip everything (`GCOV_PREFIX_STRIP=99`) so the `.gcda` sit flat next to the
   flat `.gcno` — see `targets/secure_delete.conf` / `tests/secure_delete.sh`.
 - **multi-directory** sources (autotools trees with `lib/`, `src/`, `extensions/`
-  …, e.g. `iptables`): flattening would collide on basenames, so the layout must
-  be preserved. `target_build` records the absolute host build root in
+  …, e.g. `iptables`, `cryptsetup`): flattening would collide on basenames, so the
+  layout must be preserved. `target_build` records the absolute host build root in
   `$TARGET_SRC/.gcov-build-root`, and the driver sets `GCOV_PREFIX_STRIP` to that
   path's component count. libgcov then reproduces the build tree under
   `$GCOV_PREFIX` at paths **relative to `$TARGET_SRC`**, matching the `.gcno` so
@@ -96,7 +96,9 @@ Build notes for autotools userspace packages (see `targets/iptables.conf`):
   linking yields real, relocatable ELF binaries; objects (and thus coverage) are
   identical.
 - **Reuse the suite.** Prefer the package's **own `make check` TESTS** over
-  hand-written tests.
+  hand-written tests. See also `targets/cryptsetup.conf`, which builds the C test
+  programs (`make -C tests check-programs`) on the host so the guest needs no
+  compiler.
 
 ## TARGET_NETFILTER
 
