@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/x86_64 6.1.180-un-def-alt1 Kernel Configuration
+# Linux/x86_64 6.1.182-un-def-alt1 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="gcc-10 (GCC) 10.3.1 20210703 (ALT Sisyphus 10.3.1-alt2)"
 CONFIG_CC_IS_GCC=y
