@@ -96,8 +96,8 @@ make ARCH=x86_64 O="$KERNEL_BUILD_DIR" x86_64_defconfig
 #----------------------------------------------------
 # Apply ALT config
 # https://packages.altlinux.org/ru/p10/srpms/kernel-image-un-def/
-# curl -s https://git.altlinux.org/tasks/archive/done/_417/427587/build/100/x86_64/rpms/kernel-image-un-def-6.1.180-alt1.x86_64.rpm | rpm2cpio | cpio -imdv "./boot/config-6.1.180-un-def-alt1"
-cat "$CONTAINER_REPO_DIR/config/kernel/config-6.1.180-un-def-alt1" >> "$KERNEL_BUILD_DIR/.config"
+# curl -s https://git.altlinux.org/tasks/archive/done/_418/428684/build/100/x86_64/rpms/kernel-image-un-def-6.1.182-alt1.x86_64.rpm | rpm2cpio | cpio -imdv "./boot/config-6.1.182-un-def-alt1"
+cat "$CONTAINER_REPO_DIR/config/kernel/config-6.1.182-un-def-alt1" >> "$KERNEL_BUILD_DIR/.config"
 
 # Sets the necessary baseline configuration options (including those required to
 # boot without an initrd) before the final configuration or manual overrides are applied.
