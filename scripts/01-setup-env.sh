@@ -12,14 +12,14 @@
 export TERM="xterm-256color"
 
 # General kernel local verion
-export KERNEL_LOCALVERSION="alt-syz-box-drivers_md_dm-vdo"
+export KERNEL_LOCALVERSION="alt-syz-box-drivers_md_bcache"
 
 # Select which syzkaller config template to use from 'config/syzkaller/'
-export SYZ_CONFIG_TEMPLATE="drivers_md_dm-vdo"
+export SYZ_CONFIG_TEMPLATE="drivers_md_bcache"
 
 # Space-separated list of sys/linux/*.txt files for which to regenerate
 # .const via syz-extract during the syzkaller build
-export SYZ_EXTRACT_TARGETS="dev_dm.txt dev_dm_targets.txt dev_dm_crypt.txt dev_dm_persistent.txt dev_md.txt dev_dm_zoned.txt dev_dm_vdo.txt"
+export SYZ_EXTRACT_TARGETS="dev_dm.txt dev_dm_targets.txt dev_dm_crypt.txt dev_dm_persistent.txt dev_md.txt dev_dm_zoned.txt dev_dm_vdo.txt dev_bcache.txt"
 
 # ALT Linux branch ('p11', 'p10', 'sisyphus', etc.)
 export ALT_BRANCH="p11"
