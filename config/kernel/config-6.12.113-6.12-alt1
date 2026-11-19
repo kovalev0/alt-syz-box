@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/x86_64 6.12.111-6.12-alt1 Kernel Configuration
+# Linux/x86_64 6.12.113-6.12-alt1 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="gcc-13 (GCC) 13.2.1 20240128 (ALT c11f1 13.2.1-alt3)"
 CONFIG_CC_IS_GCC=y
