@@ -260,7 +260,7 @@ gcov_report() {
             mkdir -p "$merged/$(dirname "$f")"; cp "$gcda_root/$f" "$merged/$f"
         done )
 
-    if ! find "$merged" -name '*.gcda' | grep -q .; then
+    if [ -z "$(find "$merged" -name '*.gcda' -print -quit 2>/dev/null)" ]; then
         echo "⚠️  No .gcda captured for $prefix — did the module load and run?" >&2
         echo "    (A gcov kernel is required; see scripts/06-run-unit-tests.sh.)" >&2
         rm -rf "$merged"
